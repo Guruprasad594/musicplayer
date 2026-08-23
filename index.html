@@ -582,8 +582,18 @@
 <script>
   const PLAYLISTS = [
     { id: 'https://www.youtube.com/watch?v=KQ5oWUygSK0&list=PLJQleqNYzjsA', name: 'Hindi', color: '#ff7448' },
-    { id: 'https://www.youtube.com/watch?v=EpWzjiLS2Rg&list=PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5', name: 'Kannada', color: '#f3c04d' },
-    { id: 'https://www.youtube.com/watch?v=16y1AkoZkmQ&list=PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z', name: 'All Songs', color: '#47d18c' },
+    {
+      id: 'https://www.youtube.com/watch?v=EpWzjiLS2Rg&list=PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5',
+      name: 'Kannada',
+      color: '#f3c04d',
+      tracks: ['EpWzjiLS2Rg', 'ID6CEj7t4Us', 'labVkcSBX68', 'qyoKUPJX63k', 'Mfv-zseDd90', 'ksANu45I16U', 'k7QJbycs_nE', 'p3BNPcd66rA', 'NW8SnpSzH8k', 'e4h0VoZpdI8', '63PTx_1WEq4', '99138T2WeOQ', '-38NkwtdjVo', '1OTTa47yV0w', 'pd7cp6gQKac', 'QrzM1amZUsg', 'Gf-cxRMVEBU', 'pxCWiYFkvTg'],
+    },
+    {
+      id: 'https://www.youtube.com/watch?v=16y1AkoZkmQ&list=PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z',
+      name: 'All Songs',
+      color: '#47d18c',
+      tracks: ['16y1AkoZkmQ', 'SS3lIQdKP-A', 'SJ5B9SW4ONQ', 'jlmyZ_x5vjc', 'i1o1p_DD6TU', 'zWEOx7TSM6I', '6k8Aja80GQM', '1gukvtH_a3I', 'iv7lcUkFVSc', 'dKYH8-9mLlQ', 'QNJL6nfu__Q', 'tThJdNt-_5I', 'z65MTQQjgjg', 'y83x7MgzWOA', 'IngvLGgX-YU', '2egn2ssP7MM', 'hhdSyBHuI88', 'hXh35CtnSyU', 'WupTfpXdun0', '29YRI-6low0', 'xE9FBL7jUGA', 'JGwWNGJdvx8', '4NRXx6U8ABQ', '7wtfhZwyrcc', 'VOLKJJvfAbg', '7LSOgn6APzE', 'ldLSmUwyL34', 'dESIGVxSSCE', 'OVHkruv-dg8', 'YVdsmoQgGHM', 'YyepU5ztLf4', 'WK_PlcL8Tzo', 'TkLkStcQ0o4', '3_kVMDG-k5M'],
+    },
   ];
 
   const state = {
@@ -647,6 +657,10 @@
     return normalizePlaylistId(currentPlaylist().id);
   }
 
+  function seededTrackIds(){
+    return currentPlaylist().tracks || [];
+  }
+
   function thumbnail(id, quality = 'mqdefault'){
     return id ? `https://i.ytimg.com/vi/${id}/${quality}.jpg` : '';
   }
@@ -678,7 +692,9 @@
 
   function showPlayerMessage(text, kind = ''){
     if (!text){
-      els.cover.hidden = true;
+      els.cover.hidden = false;
+      els.cover.textContent = 'Audio only';
+      els.cover.className = 'player-cover';
       return;
     }
     els.cover.hidden = false;
@@ -895,6 +911,12 @@
           if (token !== state.loadToken) return;
           state.playerReady = true;
           try {
+            const tracks = seededTrackIds();
+            if (tracks.length){
+              state.player.cuePlaylist({ list: tracks, index: 0, startSeconds: 0 });
+              finishPlaylistLoad(tracks, token);
+              return;
+            }
             state.player.cuePlaylist({ listType: 'playlist', list: playlistId, index: 0, startSeconds: 0 });
             waitForPlaylist(token);
           } catch {
@@ -1078,7 +1100,12 @@
         state.player.playVideoAt(index);
         window.setTimeout(() => state.player.playVideo && state.player.playVideo(), 80);
       } else if (state.player.loadPlaylist){
-        state.player.loadPlaylist({ listType: 'playlist', list: currentPlaylistId(), index, startSeconds: 0 });
+        const tracks = seededTrackIds();
+        const list = tracks.length ? tracks : currentPlaylistId();
+        const request = tracks.length
+          ? { list, index, startSeconds: 0 }
+          : { listType: 'playlist', list, index, startSeconds: 0 };
+        state.player.loadPlaylist(request);
       }
     } catch {
       setStatus('Could not play track', 'error');
