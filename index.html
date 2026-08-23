@@ -1442,8 +1442,8 @@
   setMediaAction('pause', () => state.player && state.player.pauseVideo && state.player.pauseVideo());
   setMediaAction('previoustrack', previousTrack);
   setMediaAction('nexttrack', nextTrack);
-  setMediaAction('seekbackward', event => seekBy(-(event.seekOffset || 10)));
-  setMediaAction('seekforward', event => seekBy(event.seekOffset || 10));
+  setMediaAction('seekbackward', previousTrack);
+  setMediaAction('seekforward', nextTrack);
   setMediaAction('seekto', event => {
     if (event.fastSeek && state.player && state.player.seekTo){
       state.player.seekTo(event.seekTime || 0, true);
