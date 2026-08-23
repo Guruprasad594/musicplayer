@@ -334,9 +334,9 @@
 
 <script>
   const PLAYLISTS = [
-    { id: 'PLJQleqNYzjsA&si=wz5hDWoW_cbdrKmw', name: 'Hindi',     color: 'var(--hindi)' },
-    { id: 'PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5&si=MWLOjbIbr98oMFCy', name: 'Kannada',  color: 'var(--kannada)' },
-    { id: 'PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z&si=0_JLzfzIeFBKmYur', name: 'All Songs', color: 'var(--all)' },
+    { id: 'https://www.youtube.com/watch?v=KQ5oWUygSK0&list=PLJQleqNYzjsA', name: 'Hindi',     color: 'var(--hindi)' },
+    { id: 'https://www.youtube.com/watch?v=EpWzjiLS2Rg&list=PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5', name: 'Kannada',  color: 'var(--kannada)' },
+    { id: 'https://www.youtube.com/watch?v=16y1AkoZkmQ&list=PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z', name: 'All Songs', color: 'var(--all)' },
   ];
 
   let player, currentTab = 0, currentIds = [], meta = {}, isPlaying = false, activeIndex = -1;
@@ -385,11 +385,27 @@
   }
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
+  function normalizePlaylistId(input){
+    const value = String(input || '').trim();
+    try {
+      const url = new URL(value);
+      return url.searchParams.get('list') || value;
+    } catch {
+      return value.split('&')[0].split('?')[0];
+    }
+  }
+
   function loadTab(i){
     const pl = PLAYLISTS[i];
+    const playlistId = normalizePlaylistId(pl.id);
     skeletonUI();
+    if (cache[playlistId]){
+      currentIds = cache[playlistId];
+      renderList(pl, currentIds);
+      return;
+    }
     if (!player || !player.cuePlaylist){ return; }
-    player.cuePlaylist({ listType: 'playlist', list: pl.id });
+    player.cuePlaylist({ listType: 'playlist', list: playlistId });
 
     let tries = 0;
     const poll = setInterval(()=>{
@@ -398,7 +414,7 @@
       if (ids && ids.length){
         clearInterval(poll);
         currentIds = ids;
-        cache[pl.id] = ids;
+        cache[playlistId] = ids;
         renderList(pl, ids);
       } else if (tries > 40){
         clearInterval(poll);
