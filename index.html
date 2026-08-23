@@ -889,9 +889,6 @@
         modestbranding: 1,
         enablejsapi: 1,
         origin: window.location.origin,
-        listType: 'playlist',
-        list: playlistId,
-        index: 0,
       },
       events: {
         onReady: () => {
@@ -1148,6 +1145,10 @@
   }
 
   function onPlayerError(){
+    if (state.isLoading || !state.videoIds.length){
+      return;
+    }
+
     const index = syncActiveIndex();
     const id = state.videoIds[index];
     if (id){
