@@ -335,15 +335,15 @@
 <script>
   const PLAYLISTS = [
     { id: 'PLJQleqNYzjsA&si=wz5hDWoW_cbdrKmw', name: 'Hindi',     color: 'var(--hindi)' },
-    { id: 'PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5', name: 'Kannada',  color: 'var(--kannada)' },
-    { id: 'PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z', name: 'All Songs', color: 'var(--all)' },
+    { id: 'PLIcMNJE9Jy02bkSjfPArcKzumCsSf6es5&si=MWLOjbIbr98oMFCy', name: 'Kannada',  color: 'var(--kannada)' },
+    { id: 'PLIcMNJE9Jy01RpjrBYnspCTxt2_7moh4Z&si=xms7-uZT8ZcpbWko', name: 'All Songs', color: 'var(--all)' },
   ];
 
   let player, currentTab = 0, currentIds = [], meta = {}, isPlaying = false, activeIndex = -1;
   const cache = {}; // playlist videoId arrays cache
 
   const tabsEl = document.getElementById('tabs');
-  const mainEl = document.getElementById('main');
+  const mainEl = document.getElementById('main'); 
   const playBtn = document.getElementById('play-btn');
   const playIcon = document.getElementById('play-icon');
   const prevBtn = document.getElementById('prev-btn');
