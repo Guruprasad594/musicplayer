@@ -138,9 +138,10 @@
     flex:1;
     min-height:0;
     display:grid;
-    grid-template-columns:minmax(0, 1.35fr) minmax(340px, .65fr);
-    gap:18px;
-    padding:18px;
+    grid-template-columns:minmax(0, 1fr);
+    grid-template-rows:auto minmax(0, 1fr);
+    gap:12px;
+    padding:12px 18px 18px;
   }
 
   .stage,
@@ -155,15 +156,19 @@
   }
 
   .stage{
-    display:grid;
-    grid-template-rows:minmax(260px, 1fr) auto;
+    display:block;
   }
 
   .player-frame{
-    position:relative;
+    position:fixed;
+    left:-10000px;
+    top:-10000px;
+    width:220px;
+    height:220px;
     background:#060606;
-    min-height:260px;
-    aspect-ratio:16 / 9;
+    min-height:0;
+    opacity:0;
+    pointer-events:none;
   }
 
   #yt-player,
@@ -177,7 +182,7 @@
   .player-cover{
     position:absolute;
     inset:0;
-    display:grid;
+    display:none;
     place-items:center;
     padding:28px;
     text-align:center;
@@ -238,6 +243,23 @@
     white-space:nowrap;
     text-overflow:ellipsis;
     margin-top:2px;
+  }
+
+  .progress-row{
+    grid-column:2 / -1;
+    display:grid;
+    grid-template-columns:44px minmax(0, 1fr) 44px;
+    align-items:center;
+    gap:10px;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:800;
+    font-variant-numeric:tabular-nums;
+  }
+  .seek{
+    width:100%;
+    accent-color:var(--accent);
+    cursor:pointer;
   }
 
   .controls{
@@ -364,7 +386,7 @@
     border-radius:var(--radius);
     background:transparent;
     display:grid;
-    grid-template-columns:34px 76px minmax(0, 1fr) auto;
+    grid-template-columns:34px 76px minmax(0, 1fr);
     align-items:center;
     gap:12px;
     padding:8px;
@@ -415,7 +437,7 @@
     border-radius:6px;
     background:var(--panel-2);
   }
-  .track-main{min-width:0}
+  .track-main{min-width:0; overflow:hidden}
   .track-title{
     font-size:14px;
     line-height:1.25;
@@ -435,14 +457,7 @@
     margin-top:3px;
   }
   .track-badge{
-    color:var(--weak);
-    border:1px solid var(--line);
-    border-radius:999px;
-    padding:5px 8px;
-    font-size:11px;
-    font-weight:900;
-    text-transform:uppercase;
-    letter-spacing:.08em;
+    display:none;
   }
   .track-row.active .track-badge{
     color:var(--accent);
@@ -488,11 +503,11 @@
     .tabs{max-width:100%; width:100%}
     .layout{
       grid-template-columns:1fr;
+      grid-template-rows:auto auto;
       padding:12px;
       gap:12px;
       min-height:auto;
     }
-    .stage{grid-template-rows:auto auto}
     .queue{min-height:520px}
   }
 
@@ -507,6 +522,10 @@
     .controls{
       grid-column:1 / -1;
       justify-content:center;
+    }
+    .progress-row{
+      grid-column:1 / -1;
+      grid-template-columns:42px minmax(0, 1fr) 42px;
     }
     .track-row{
       grid-template-columns:28px 64px minmax(0, 1fr);
@@ -553,6 +572,11 @@
           <button class="icon-btn" id="next-btn" type="button" aria-label="Next track" title="Next">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM5 19V5l10 7z"></path></svg>
           </button>
+        </div>
+        <div class="progress-row">
+          <span id="current-time">0:00</span>
+          <input class="seek" id="seek-bar" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+          <span id="duration">0:00</span>
         </div>
       </div>
     </section>
@@ -609,6 +633,9 @@
     query: '',
     loadToken: 0,
     pollTimer: 0,
+    progressTimer: 0,
+    loadedVideoId: '',
+    isSeeking: false,
     statusKind: '',
     statusText: 'Connecting',
   };
@@ -632,6 +659,9 @@
     playIcon: document.getElementById('play-icon'),
     prevBtn: document.getElementById('prev-btn'),
     nextBtn: document.getElementById('next-btn'),
+    currentTime: document.getElementById('current-time'),
+    duration: document.getElementById('duration'),
+    seekBar: document.getElementById('seek-bar'),
     playlistTitle: document.getElementById('playlist-title'),
     trackCount: document.getElementById('track-count'),
     searchInput: document.getElementById('search-input'),
@@ -913,7 +943,6 @@
           try {
             const tracks = seededTrackIds();
             if (tracks.length){
-              state.player.cuePlaylist({ list: tracks, index: 0, startSeconds: 0 });
               finishPlaylistLoad(tracks, token);
               return;
             }
@@ -940,6 +969,7 @@
     state.activeIndex = -1;
     state.isPlaying = false;
     state.isLoading = true;
+    state.loadedVideoId = '';
     state.query = '';
     state.loadToken += 1;
     els.searchInput.value = '';
@@ -1011,8 +1041,10 @@
     state.activeIndex = 0;
     state.isLoading = false;
     state.isPlaying = false;
+    state.loadedVideoId = '';
     setStatus(`${ids.length} ${ids.length === 1 ? 'track' : 'tracks'}`, 'ok');
     showPlayerMessage('');
+    updateProgress();
     repaint();
     hydrateMetadata(ids, token);
   }
@@ -1022,8 +1054,10 @@
     state.videoIds = [];
     state.activeIndex = -1;
     state.isPlaying = false;
+    state.loadedVideoId = '';
     setStatus(message, 'error');
     showPlayerMessage(message, 'error');
+    updateProgress();
     repaint();
   }
 
@@ -1086,27 +1120,64 @@
     return state.activeIndex;
   }
 
+  function formatTime(seconds){
+    const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+    const minutes = Math.floor(safeSeconds / 60);
+    const rest = String(safeSeconds % 60).padStart(2, '0');
+    return `${minutes}:${rest}`;
+  }
+
+  function updateProgress(){
+    let current = 0;
+    let duration = 0;
+    try {
+      if (state.player && state.player.getCurrentTime) current = state.player.getCurrentTime() || 0;
+      if (state.player && state.player.getDuration) duration = state.player.getDuration() || 0;
+    } catch {
+      current = 0;
+      duration = 0;
+    }
+
+    els.currentTime.textContent = formatTime(current);
+    els.duration.textContent = formatTime(duration);
+    if (!state.isSeeking){
+      els.seekBar.value = duration > 0 ? String(Math.min(1000, Math.round((current / duration) * 1000))) : '0';
+    }
+  }
+
+  function startProgressTimer(){
+    if (state.progressTimer) return;
+    state.progressTimer = window.setInterval(updateProgress, 500);
+  }
+
+  function stopProgressTimer(){
+    if (!state.progressTimer) return;
+    clearInterval(state.progressTimer);
+    state.progressTimer = 0;
+  }
+
   function playTrack(index){
     if (!state.playerReady || !state.videoIds[index]) return;
 
+    const id = state.videoIds[index];
     state.activeIndex = index;
     state.isPlaying = true;
+    state.loadedVideoId = id;
     setStatus(`${state.videoIds.length} tracks`, 'ok');
     showPlayerMessage('');
+    els.seekBar.value = '0';
+    els.currentTime.textContent = '0:00';
     repaint();
 
     try {
-      if (state.player.playVideoAt){
+      if (state.player.loadVideoById){
+        state.player.loadVideoById(id);
+      } else if (state.player.loadVideoByUrl){
+        state.player.loadVideoByUrl(`https://www.youtube.com/watch?v=${id}`);
+      } else if (state.player.playVideoAt){
         state.player.playVideoAt(index);
-        window.setTimeout(() => state.player.playVideo && state.player.playVideo(), 80);
-      } else if (state.player.loadPlaylist){
-        const tracks = seededTrackIds();
-        const list = tracks.length ? tracks : currentPlaylistId();
-        const request = tracks.length
-          ? { list, index, startSeconds: 0 }
-          : { listType: 'playlist', list, index, startSeconds: 0 };
-        state.player.loadPlaylist(request);
       }
+      startProgressTimer();
     } catch {
       setStatus('Could not play track', 'error');
       state.isPlaying = false;
@@ -1128,9 +1199,16 @@
       return;
     }
 
+    const id = state.videoIds[state.activeIndex];
+    if (state.loadedVideoId !== id){
+      playTrack(state.activeIndex);
+      return;
+    }
+
     try {
       state.player.playVideo && state.player.playVideo();
       state.isPlaying = true;
+      startProgressTimer();
       repaint();
     } catch {
       playTrack(state.activeIndex);
@@ -1158,14 +1236,22 @@
       state.isPlaying = true;
       setStatus(`${state.videoIds.length} tracks`, 'ok');
       showPlayerMessage('');
+      startProgressTimer();
     } else if (event.data === playerState.PAUSED || event.data === playerState.ENDED){
       syncActiveIndex();
       state.isPlaying = false;
+      updateProgress();
+      if (event.data === playerState.ENDED && state.videoIds.length > 1){
+        nextTrack();
+        return;
+      }
     } else if (event.data === playerState.CUED){
       syncActiveIndex();
       state.isPlaying = false;
+      updateProgress();
     } else if (event.data === playerState.BUFFERING){
       syncActiveIndex();
+      updateProgress();
     }
 
     repaint();
@@ -1204,6 +1290,29 @@
   els.playBtn.addEventListener('click', togglePlay);
   els.nextBtn.addEventListener('click', nextTrack);
   els.prevBtn.addEventListener('click', previousTrack);
+  els.seekBar.addEventListener('input', () => {
+    state.isSeeking = true;
+    let duration = 0;
+    try {
+      duration = state.player && state.player.getDuration ? state.player.getDuration() || 0 : 0;
+    } catch {
+      duration = 0;
+    }
+    els.currentTime.textContent = formatTime((Number(els.seekBar.value) / 1000) * duration);
+  });
+  els.seekBar.addEventListener('change', () => {
+    let duration = 0;
+    try {
+      duration = state.player && state.player.getDuration ? state.player.getDuration() || 0 : 0;
+      if (duration > 0 && state.player.seekTo){
+        state.player.seekTo((Number(els.seekBar.value) / 1000) * duration, true);
+      }
+    } catch {
+      duration = 0;
+    }
+    state.isSeeking = false;
+    updateProgress();
+  });
 
   if ('mediaSession' in navigator){
     navigator.mediaSession.setActionHandler('play', togglePlay);
