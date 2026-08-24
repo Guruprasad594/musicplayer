@@ -403,37 +403,25 @@
 
   .tools{
     display:flex;
-    gap:10px;
+    flex-direction:column;
+    gap:8px;
     padding:12px 16px;
     border-bottom:1px solid var(--line-soft);
   }
-  .add-panel{
-    display:none;
-    padding:12px 16px 14px;
-    border-bottom:1px solid var(--line-soft);
-    background:rgba(255,255,255,.03);
-  }
-  .add-panel.is-open{display:block}
-  .add-copy{
-    color:var(--muted);
-    font-size:12px;
+  .search-hint{
+    margin:0;
+    color:var(--weak);
+    font-size:11px;
     font-weight:700;
-    line-height:1.4;
-    margin:0 0 10px;
   }
-  .add-row{
-    display:flex;
-    gap:8px;
-  }
-  .add-row .search{flex:1}
   .search-results{
     display:flex;
     flex-direction:column;
     gap:6px;
-    margin-top:10px;
     max-height:280px;
     overflow:auto;
   }
+  .search-results:empty{display:none}
   .search-row{
     width:100%;
     border:1px solid var(--line);
@@ -566,6 +554,7 @@
   .remove-track:hover{color:#ffb4a4; background:rgba(255,255,255,.08)}
   .search{
     min-width:0;
+    width:100%;
     flex:1;
     height:42px;
     display:flex;
@@ -880,26 +869,16 @@
         </div>
         <div class="queue-actions">
           <span class="count" id="track-count">0 tracks</span>
-          <button class="text-btn" id="add-songs-btn" type="button">Add songs</button>
           <button class="text-btn danger" id="delete-playlist-btn" type="button" hidden>Delete</button>
         </div>
       </div>
 
       <div class="tools">
-        <label class="search" aria-label="Search queue">
+        <label class="search" aria-label="Search YouTube">
           <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2"><path d="m21 21-4.3-4.3"></path><circle cx="11" cy="11" r="7"></circle></svg>
-          <input id="search-input" type="search" placeholder="Filter this playlist" autocomplete="off">
+          <input id="search-input" type="search" placeholder="Search YouTube songs" autocomplete="off">
         </label>
-      </div>
-
-      <div class="add-panel" id="add-panel" hidden>
-        <p class="add-copy" id="add-copy">Search YouTube or paste a song link, then add it to this playlist.</p>
-        <div class="add-row">
-          <label class="search" aria-label="Search YouTube">
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2"><path d="m21 21-4.3-4.3"></path><circle cx="11" cy="11" r="7"></circle></svg>
-            <input id="youtube-search" type="search" placeholder="Search songs or paste a YouTube link" autocomplete="off">
-          </label>
-        </div>
+        <p class="search-hint">Results come from YouTube, not this playlist.</p>
         <div class="search-results" id="search-results"></div>
       </div>
 
@@ -920,7 +899,7 @@
       <span>YouTube link</span>
       <input id="new-playlist-url" type="text" inputmode="url" placeholder="Playlist or song URL (optional)" autocomplete="off">
     </label>
-    <p class="sheet-hint">Paste a YouTube playlist or video link. You can search and add more songs after you create it.</p>
+    <p class="sheet-hint">Paste a YouTube playlist or video link if you have one. You can also search YouTube after you create it.</p>
     <div class="sheet-actions">
       <button id="playlist-cancel" type="button">Cancel</button>
       <button class="primary" type="submit">Create</button>
@@ -960,7 +939,6 @@
     isPlaying: false,
     shouldPlay: false,
     isLoading: true,
-    query: '',
     loadToken: 0,
     pollTimer: 0,
     progressTimer: 0,
@@ -970,7 +948,8 @@
     statusText: 'Connecting',
     searchTimer: 0,
     searchToken: 0,
-    addOpen: false,
+    searchItems: [],
+    pendingAdd: null,
   };
 
   window.__surErrors = [];
@@ -1002,11 +981,7 @@
     iosHint: document.getElementById('ios-hint'),
     trackList: document.getElementById('track-list'),
     newPlaylistBtn: document.getElementById('new-playlist-btn'),
-    addSongsBtn: document.getElementById('add-songs-btn'),
     deletePlaylistBtn: document.getElementById('delete-playlist-btn'),
-    addPanel: document.getElementById('add-panel'),
-    addCopy: document.getElementById('add-copy'),
-    youtubeSearch: document.getElementById('youtube-search'),
     searchResults: document.getElementById('search-results'),
     playlistDialog: document.getElementById('playlist-dialog'),
     playlistForm: document.getElementById('playlist-form'),
@@ -1183,11 +1158,6 @@
     els.playBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.isLoading);
     els.nextBtn.disabled = !state.playerReady || !state.videoIds.length;
     if (els.deletePlaylistBtn) els.deletePlaylistBtn.hidden = !playlist.custom;
-    if (els.addCopy){
-      els.addCopy.textContent = playlist.custom
-        ? 'Search YouTube or paste a song link, then add it to this playlist.'
-        : 'Create your own playlist with + to search and add songs.';
-    }
     renderTabs();
     updateNowPlaying();
   }
@@ -1217,23 +1187,11 @@
     }
 
     if (!state.videoIds.length){
-      renderEmpty(currentPlaylist().custom ? 'No tracks yet. Add songs above.' : 'No tracks loaded');
+      renderEmpty(currentPlaylist().custom ? 'No tracks yet. Search YouTube above to add songs.' : 'No tracks loaded');
       return;
     }
 
-    const query = state.query.trim().toLowerCase();
-    const rows = state.videoIds
-      .map((id, index) => ({ id, index, track: getTrack(id, index) }))
-      .filter(({ index, track }) => {
-        if (!query) return true;
-        const haystack = `${index + 1} ${track.title} ${track.author}`.toLowerCase();
-        return haystack.includes(query);
-      });
-
-    if (!rows.length){
-      renderEmpty('No matching tracks');
-      return;
-    }
+    const rows = state.videoIds.map((id, index) => ({ id, index, track: getTrack(id, index) }));
 
     const fragment = document.createDocumentFragment();
     rows.forEach(({ id, index, track }) => {
@@ -1462,13 +1420,12 @@
     state.shouldPlay = false;
     state.isLoading = true;
     state.loadedVideoId = '';
-    state.query = '';
     state.loadToken += 1;
-    state.addOpen = !!options.keepAddOpen;
-    els.searchInput.value = '';
-    if (els.youtubeSearch) els.youtubeSearch.value = '';
-    if (els.searchResults) els.searchResults.replaceChildren();
-    syncAddPanel();
+    if (!options.keepSearch){
+      state.searchItems = [];
+      els.searchInput.value = '';
+      if (els.searchResults) els.searchResults.replaceChildren();
+    }
 
     const playlist = currentPlaylist();
     setAccent(playlist.color);
@@ -1835,11 +1792,6 @@
 
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
 
-  els.searchInput.addEventListener('input', () => {
-    state.query = els.searchInput.value;
-    renderTracks();
-  });
-
   function fetchJson(url, timeoutMs = 8000){
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -1849,6 +1801,25 @@
     }).finally(() => {
       clearTimeout(timer);
     });
+  }
+
+  function fetchText(url, timeoutMs = 10000){
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { signal: controller.signal }).then(response => {
+      if (!response.ok) throw new Error('bad status');
+      return response.text();
+    }).finally(() => {
+      clearTimeout(timer);
+    });
+  }
+
+  function decodeYoutubeText(value){
+    return String(value || '')
+      .replaceAll('\\"', '"')
+      .replaceAll('\\u0026', '&')
+      .replaceAll(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replaceAll('&amp;', '&');
   }
 
   function videoIdFromResultUrl(url){
@@ -1862,20 +1833,60 @@
     const results = [];
     const seen = new Set();
     list.forEach(item => {
+      if (!item || typeof item !== 'object') return;
       if (kind === 'piped' && item.type && item.type !== 'stream' && item.type !== 'video') return;
       if (kind === 'invidious' && item.type && item.type !== 'video') return;
-      let id = item.videoId || '';
+      let id = item.videoId || item.video_id || '';
+      if (!id && item.id && typeof item.id === 'object') id = item.id.videoId || '';
       if (!id && typeof item.id === 'string' && /^[\w-]{11}$/.test(item.id)) id = item.id;
       if (!id) id = videoIdFromResultUrl(item.url);
       if (!id || seen.has(id)) return;
       seen.add(id);
+      const snippet = item.snippet || {};
       results.push({
         id,
-        title: item.title || 'YouTube video',
-        author: item.uploaderName || item.author || item.uploader || 'YouTube',
+        title: item.title || snippet.title || 'YouTube video',
+        author: item.uploaderName || item.author || item.uploader || snippet.channelTitle || 'YouTube',
       });
     });
     return results;
+  }
+
+  function parseYoutubeResultsHtml(html){
+    const results = [];
+    const seen = new Set();
+    String(html || '').split('"videoRenderer"').slice(1).forEach(chunk => {
+      const idMatch = chunk.match(/"videoId":"([\w-]{11})"/);
+      if (!idMatch || seen.has(idMatch[1])) return;
+      const titleMatch = chunk.match(/"title":\{"runs":\[\{"text":"(.*?)"\}/);
+      const authorMatch = chunk.match(/"ownerText":\{"runs":\[\{"text":"(.*?)"\}/)
+        || chunk.match(/"shortBylineText":\{"runs":\[\{"text":"(.*?)"\}/);
+      seen.add(idMatch[1]);
+      results.push({
+        id: idMatch[1],
+        title: decodeYoutubeText(titleMatch && titleMatch[1]) || 'YouTube video',
+        author: decodeYoutubeText(authorMatch && authorMatch[1]) || 'YouTube',
+      });
+    });
+    return results;
+  }
+
+  async function searchYouTubePage(query){
+    const target = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%3D%3D`;
+    const proxies = [
+      `https://corsproxy.io/?${encodeURIComponent(target)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    ];
+    for (const url of proxies){
+      try {
+        const html = await fetchText(url);
+        const items = parseYoutubeResultsHtml(html);
+        if (items.length) return items.slice(0, 12);
+      } catch {
+        /* try the next proxy */
+      }
+    }
+    return [];
   }
 
   async function searchYouTube(query){
@@ -1897,23 +1908,28 @@
       { url: `https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(q)}&filter=videos`, kind: 'piped' },
       { url: `https://api.piped.private.coffee/search?q=${encodeURIComponent(q)}&filter=videos`, kind: 'piped' },
       { url: `https://pipedapi.adminforge.de/search?q=${encodeURIComponent(q)}&filter=videos`, kind: 'piped' },
+      { url: `https://pipedapi.reallyaweso.me/search?q=${encodeURIComponent(q)}&filter=videos`, kind: 'piped' },
       { url: `https://invidious.fdn.fr/api/v1/search?q=${encodeURIComponent(q)}&type=video`, kind: 'invidious' },
       { url: `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(q)}&type=video`, kind: 'invidious' },
+      { url: `https://invidious.materialio.us/api/v1/search?q=${encodeURIComponent(q)}&type=video`, kind: 'invidious' },
+      { url: `https://yt.lemnoslife.com/noKey/search?part=snippet&type=video&maxResults=12&q=${encodeURIComponent(q)}`, kind: 'youtube' },
     ];
 
-    for (const endpoint of endpoints){
-      try {
-        const data = await fetchJson(endpoint.url);
-        const items = normalizeSearchResults(data, endpoint.kind);
-        if (items.length) return items.slice(0, 12);
-      } catch {
-        /* try the next public search endpoint */
-      }
-    }
-    throw new Error('search failed');
-  }
+    const tasks = endpoints.map(async endpoint => {
+      const data = await fetchJson(endpoint.url);
+      const items = normalizeSearchResults(data, endpoint.kind);
+      if (!items.length) throw new Error('empty');
+      return items.slice(0, 12);
+    });
 
-  let lastSearchItems = [];
+    try {
+      return await Promise.any(tasks);
+    } catch {
+      const pageItems = await searchYouTubePage(q);
+      if (pageItems.length) return pageItems;
+      throw new Error('search failed');
+    }
+  }
 
   function renderSearchResults(items, message){
     if (!els.searchResults) return;
@@ -1955,8 +1971,9 @@
 
   function addTrack(item){
     if (!currentPlaylist().custom){
+      state.pendingAdd = item;
       openPlaylistDialog();
-      setStatus('Name a playlist, then add songs', 'warn');
+      setStatus('Name a playlist, then this song will be added', 'warn');
       return;
     }
     if (!item || !item.id || state.videoIds.includes(item.id)) return;
@@ -1976,9 +1993,9 @@
     setStatus(`${state.videoIds.length} tracks`, 'ok');
     showPlayerMessage('');
     repaint();
-    renderSearchResults(lastSearchItems);
+    renderSearchResults(state.searchItems);
     loadTrackMetadata(item.id, startIndex, state.loadToken);
-    if (startIndex === 0 && state.playerReady) playTrack(0);
+    if (state.playerReady) playTrack(startIndex);
   }
 
   function removeTrack(index){
@@ -2000,7 +2017,7 @@
       }
       setStatus('Add songs to this playlist');
       repaint();
-      renderSearchResults(lastSearchItems);
+      renderSearchResults(state.searchItems);
       return;
     }
 
@@ -2012,7 +2029,7 @@
 
     setStatus(`${state.videoIds.length} tracks`, 'ok');
     repaint();
-    renderSearchResults(lastSearchItems);
+    renderSearchResults(state.searchItems);
   }
 
   async function runYoutubeSearch(query){
@@ -2020,41 +2037,22 @@
     state.searchToken = token;
     const q = String(query || '').trim();
     if (!q){
-      lastSearchItems = [];
+      state.searchItems = [];
       if (els.searchResults) els.searchResults.replaceChildren();
       return;
     }
 
-    renderSearchResults([], 'Searching…');
+    renderSearchResults([], 'Searching YouTube…');
     try {
       const items = await searchYouTube(q);
       if (token !== state.searchToken) return;
-      lastSearchItems = items;
-      renderSearchResults(items, items.length ? '' : 'No songs found. Paste a YouTube link instead.');
+      state.searchItems = items;
+      renderSearchResults(items, items.length ? '' : 'No YouTube results. Paste a song link instead.');
     } catch {
       if (token !== state.searchToken) return;
-      lastSearchItems = [];
-      renderSearchResults([], 'Search is blocked. Paste a YouTube song link instead.');
+      state.searchItems = [];
+      renderSearchResults([], 'YouTube search failed. Paste a song link instead.');
     }
-  }
-
-  function syncAddPanel(){
-    if (!els.addPanel) return;
-    const open = state.addOpen && !!currentPlaylist().custom;
-    els.addPanel.classList.toggle('is-open', open);
-    els.addPanel.hidden = !open;
-    if (els.addSongsBtn) els.addSongsBtn.setAttribute('aria-expanded', String(open));
-  }
-
-  function toggleAddPanel(){
-    if (!currentPlaylist().custom){
-      openPlaylistDialog();
-      setStatus('Name a playlist, then add songs', 'warn');
-      return;
-    }
-    state.addOpen = !state.addOpen;
-    syncAddPanel();
-    if (state.addOpen && els.youtubeSearch) els.youtubeSearch.focus();
   }
 
   function openPlaylistDialog(){
@@ -2086,7 +2084,19 @@
     });
     saveCustomPlaylists();
     closePlaylistDialog();
-    loadPlaylist(playlists.length - 1, { keepAddOpen: true });
+    const pending = state.pendingAdd;
+    state.pendingAdd = null;
+    loadPlaylist(playlists.length - 1, { keepSearch: true });
+    if (pending){
+      const waitForReady = window.setInterval(() => {
+        if (state.isLoading) return;
+        clearInterval(waitForReady);
+        addTrack(pending);
+      }, 120);
+      window.setTimeout(() => clearInterval(waitForReady), 12000);
+    } else {
+      window.setTimeout(() => els.searchInput.focus(), 40);
+    }
   }
 
   function deleteCurrentPlaylist(){
@@ -2096,14 +2106,12 @@
     const index = state.playlistIndex;
     playlists.splice(index, 1);
     saveCustomPlaylists();
-    state.addOpen = false;
     loadPlaylist(Math.max(0, Math.min(index, playlists.length - 1)));
   }
   els.playBtn.addEventListener('click', togglePlay);
   els.nextBtn.addEventListener('click', nextTrack);
   els.prevBtn.addEventListener('click', previousTrack);
   els.newPlaylistBtn.addEventListener('click', openPlaylistDialog);
-  els.addSongsBtn.addEventListener('click', toggleAddPanel);
   els.deletePlaylistBtn.addEventListener('click', deleteCurrentPlaylist);
   els.playlistCancel.addEventListener('click', event => {
     event.preventDefault();
@@ -2113,17 +2121,17 @@
     event.preventDefault();
     createCustomPlaylist(els.newPlaylistName.value, els.newPlaylistUrl.value);
   });
-  els.youtubeSearch.addEventListener('input', () => {
+  els.searchInput.addEventListener('input', () => {
     window.clearTimeout(state.searchTimer);
     state.searchTimer = window.setTimeout(() => {
-      runYoutubeSearch(els.youtubeSearch.value);
+      runYoutubeSearch(els.searchInput.value);
     }, 400);
   });
-  els.youtubeSearch.addEventListener('keydown', event => {
+  els.searchInput.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
     window.clearTimeout(state.searchTimer);
-    runYoutubeSearch(els.youtubeSearch.value);
+    runYoutubeSearch(els.searchInput.value);
   });
   els.seekBar.addEventListener('input', () => {
     state.isSeeking = true;
@@ -2208,7 +2216,6 @@
   renderTabs();
   renderLoadingRows();
   renderShell();
-  syncAddPanel();
 
   const tag = document.createElement('script');
   tag.src = 'https://www.youtube.com/iframe_api';
