@@ -94,14 +94,30 @@
     white-space:nowrap;
   }
 
+  .tabs-wrap{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+    max-width:64vw;
+  }
   .tabs{
     display:flex;
     gap:8px;
     overflow-x:auto;
     scrollbar-width:none;
-    max-width:64vw;
+    min-width:0;
+    flex:1;
   }
   .tabs::-webkit-scrollbar{display:none}
+  .tab-add{
+    flex:0 0 auto;
+    min-width:38px;
+    padding:0 12px;
+    font-size:20px;
+    font-weight:700;
+    line-height:1;
+  }
 
   .tab{
     border:1px solid var(--line);
@@ -363,12 +379,188 @@
     padding-bottom:2px;
   }
 
+  .queue-actions{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .text-btn{
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.05);
+    color:var(--text);
+    min-height:32px;
+    padding:0 10px;
+    border-radius:999px;
+    cursor:pointer;
+    font-size:12px;
+    font-weight:800;
+  }
+  .text-btn:hover{background:rgba(255,255,255,.1)}
+  .text-btn.danger{color:#ffb4a4}
+  .text-btn[hidden]{display:none}
+
   .tools{
     display:flex;
     gap:10px;
     padding:12px 16px;
     border-bottom:1px solid var(--line-soft);
   }
+  .add-panel{
+    display:none;
+    padding:12px 16px 14px;
+    border-bottom:1px solid var(--line-soft);
+    background:rgba(255,255,255,.03);
+  }
+  .add-panel.is-open{display:block}
+  .add-copy{
+    color:var(--muted);
+    font-size:12px;
+    font-weight:700;
+    line-height:1.4;
+    margin:0 0 10px;
+  }
+  .add-row{
+    display:flex;
+    gap:8px;
+  }
+  .add-row .search{flex:1}
+  .search-results{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-top:10px;
+    max-height:280px;
+    overflow:auto;
+  }
+  .search-row{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    background:rgba(255,255,255,.04);
+    color:inherit;
+    display:grid;
+    grid-template-columns:76px minmax(0, 1fr) auto;
+    align-items:center;
+    gap:10px;
+    padding:8px;
+    cursor:pointer;
+    text-align:left;
+  }
+  .search-row:hover{background:rgba(255,255,255,.08)}
+  .search-row img{
+    width:76px;
+    aspect-ratio:16 / 9;
+    object-fit:cover;
+    border-radius:6px;
+    background:var(--panel-2);
+  }
+  .search-row strong, .search-row span{display:block}
+  .search-row strong{
+    font-size:13px;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+  .search-row span{
+    color:var(--muted);
+    font-size:12px;
+    margin-top:3px;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+  .search-row em{
+    font-style:normal;
+    font-size:12px;
+    font-weight:800;
+    color:var(--ok);
+    padding-right:6px;
+  }
+
+  .sheet{
+    border:1px solid var(--line);
+    background:var(--panel);
+    color:var(--text);
+    border-radius:12px;
+    padding:0;
+    width:min(440px, calc(100vw - 28px));
+  }
+  .sheet::backdrop{background:rgba(0,0,0,.62)}
+  .sheet-form{padding:18px}
+  .sheet h2{
+    margin:0 0 14px;
+    font-size:20px;
+    font-weight:900;
+  }
+  .field{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    margin-bottom:12px;
+  }
+  .field span{
+    color:var(--muted);
+    font-size:12px;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+  }
+  .field input{
+    height:42px;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    background:rgba(255,255,255,.04);
+    color:var(--text);
+    padding:0 12px;
+  }
+  .field input:focus{
+    outline:2px solid color-mix(in srgb, var(--accent), transparent 55%);
+    border-color:transparent;
+  }
+  .sheet-hint{
+    margin:0 0 16px;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:650;
+    line-height:1.45;
+  }
+  .sheet-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+  }
+  .sheet-actions button{
+    min-height:38px;
+    padding:0 14px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.05);
+    cursor:pointer;
+    font-weight:800;
+  }
+  .sheet-actions .primary{
+    background:var(--accent);
+    border-color:transparent;
+    color:var(--accent-ink);
+  }
+
+  .track-row.custom{
+    grid-template-columns:34px 76px minmax(0, 1fr) 34px;
+  }
+  .remove-track{
+    width:32px;
+    height:32px;
+    border:0;
+    border-radius:50%;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:18px;
+    line-height:1;
+  }
+  .remove-track:hover{color:#ffb4a4; background:rgba(255,255,255,.08)}
   .search{
     min-width:0;
     flex:1;
@@ -542,6 +734,7 @@
       flex-direction:column;
       padding:16px;
     }
+    .tabs-wrap{max-width:100%; width:100%}
     .tabs{max-width:100%; width:100%}
     .layout{
       padding:12px 12px 132px;
@@ -634,7 +827,10 @@
       <span class="mark">Sur</span>
       <span class="scope">YouTube playlists</span>
     </div>
-    <nav class="tabs" id="tabs" aria-label="Playlists"></nav>
+    <div class="tabs-wrap">
+      <nav class="tabs" id="tabs" aria-label="Playlists"></nav>
+      <button class="tab tab-add" id="new-playlist-btn" type="button" aria-label="Create playlist" title="Create playlist">+</button>
+    </div>
   </header>
 
   <main class="layout">
@@ -678,14 +874,29 @@
           <span class="eyebrow">Queue</span>
           <strong class="queue-title" id="playlist-title">Hindi</strong>
         </div>
-        <span class="count" id="track-count">0 tracks</span>
+        <div class="queue-actions">
+          <span class="count" id="track-count">0 tracks</span>
+          <button class="text-btn" id="add-songs-btn" type="button">Add songs</button>
+          <button class="text-btn danger" id="delete-playlist-btn" type="button" hidden>Delete</button>
+        </div>
       </div>
 
       <div class="tools">
         <label class="search" aria-label="Search queue">
           <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2"><path d="m21 21-4.3-4.3"></path><circle cx="11" cy="11" r="7"></circle></svg>
-          <input id="search-input" type="search" placeholder="Search tracks" autocomplete="off">
+          <input id="search-input" type="search" placeholder="Filter this playlist" autocomplete="off">
         </label>
+      </div>
+
+      <div class="add-panel" id="add-panel" hidden>
+        <p class="add-copy" id="add-copy">Search YouTube or paste a song link, then add it to this playlist.</p>
+        <div class="add-row">
+          <label class="search" aria-label="Search YouTube">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2"><path d="m21 21-4.3-4.3"></path><circle cx="11" cy="11" r="7"></circle></svg>
+            <input id="youtube-search" type="search" placeholder="Search songs or paste a YouTube link" autocomplete="off">
+          </label>
+        </div>
+        <div class="search-results" id="search-results"></div>
       </div>
 
       <div class="status" id="status">Connecting</div>
@@ -693,6 +904,25 @@
     </aside>
   </main>
 </div>
+
+<dialog class="sheet" id="playlist-dialog" aria-labelledby="playlist-dialog-title">
+  <form class="sheet-form" id="playlist-form">
+    <h2 id="playlist-dialog-title">New playlist</h2>
+    <label class="field">
+      <span>Playlist name</span>
+      <input id="new-playlist-name" type="text" maxlength="48" placeholder="My mix" required>
+    </label>
+    <label class="field">
+      <span>YouTube link</span>
+      <input id="new-playlist-url" type="url" placeholder="Playlist or song URL (optional)">
+    </label>
+    <p class="sheet-hint">Paste a YouTube playlist or video link. You can search and add more songs after you create it.</p>
+    <div class="sheet-actions">
+      <button id="playlist-cancel" type="button">Cancel</button>
+      <button class="primary" type="submit">Create</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
   const PLAYLISTS = [
