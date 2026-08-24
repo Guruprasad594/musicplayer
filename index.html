@@ -140,7 +140,7 @@
     min-height:auto;
     display:flex;
     flex-direction:column;
-    padding:12px 18px 128px;
+    padding:12px 18px 152px;
   }
 
   .stage,
@@ -165,16 +165,23 @@
     box-shadow:none;
   }
 
+  .now-art{
+    position:relative;
+    width:68px;
+    aspect-ratio:16 / 9;
+    border-radius:6px;
+    overflow:hidden;
+    background:var(--panel-2);
+    flex-shrink:0;
+  }
+
   .player-frame{
-    position:fixed;
-    left:-10000px;
-    top:-10000px;
-    width:220px;
-    height:220px;
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
     background:#060606;
     min-height:0;
-    opacity:0;
-    pointer-events:none;
   }
 
   #yt-player,
@@ -188,22 +195,33 @@
   .player-cover{
     position:absolute;
     inset:0;
-    display:none;
+    display:grid;
     place-items:center;
-    padding:28px;
+    padding:6px;
     text-align:center;
     background:
       linear-gradient(135deg, rgba(255,116,72,.18), transparent 38%),
       linear-gradient(315deg, rgba(71,209,140,.14), transparent 42%),
       #0b0b0b;
     color:var(--muted);
-    font-size:14px;
+    font-size:8px;
     font-weight:800;
     letter-spacing:.04em;
     text-transform:uppercase;
+    z-index:2;
   }
   .player-cover[hidden]{display:none}
   .player-cover.error{color:#ffd9c9}
+
+  .ios-hint{
+    display:none;
+    grid-column:1 / -1;
+    color:var(--muted);
+    font-size:11px;
+    font-weight:700;
+    line-height:1.35;
+  }
+  .ios-hint.is-on{display:block}
 
   .nowbar{
     position:fixed;
@@ -227,12 +245,17 @@
   }
 
   .now-thumb{
-    width:68px;
-    aspect-ratio:16 / 9;
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
     object-fit:cover;
     border-radius:6px;
     background:var(--panel-2);
+    z-index:1;
+    pointer-events:none;
   }
+  .now-thumb.is-hidden{opacity:0}
 
   .now-copy{min-width:0}
   .eyebrow{
@@ -539,7 +562,7 @@
       padding:0 12px;
       font-size:12px;
     }
-    .layout{padding:8px 8px 122px}
+    .layout{padding:8px 8px 148px}
     .queue{
       min-height:auto;
       border-radius:6px;
@@ -562,7 +585,7 @@
       width:calc(100vw - 20px);
       bottom:calc(10px + env(safe-area-inset-bottom));
     }
-    .now-thumb{width:48px}
+    .now-art{width:48px}
     .eyebrow{display:none}
     .now-title{font-size:14px}
     .now-artist{font-size:12px}
@@ -616,13 +639,14 @@
 
   <main class="layout">
     <section class="stage" aria-label="Player">
-      <div class="player-frame">
-        <div id="yt-player"></div>
-        <div class="player-cover" id="player-cover">Connecting to YouTube</div>
-      </div>
-
       <div class="nowbar">
-        <img class="now-thumb" id="now-thumb" alt="" src="">
+        <div class="now-art">
+          <div class="player-frame">
+            <div id="yt-player"></div>
+            <div class="player-cover" id="player-cover">Connecting to YouTube</div>
+          </div>
+          <img class="now-thumb" id="now-thumb" alt="" src="">
+        </div>
         <div class="now-copy">
           <span class="eyebrow" id="now-label">Now selected</span>
           <div class="now-title" id="now-title">Loading playlist</div>
@@ -644,6 +668,7 @@
           <input class="seek" id="seek-bar" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
           <span id="duration">0:00</span>
         </div>
+        <p class="ios-hint" id="ios-hint">iPhone Chrome pauses YouTube when you leave the app. Keep this tab open, or use Safari.</p>
       </div>
     </section>
 
@@ -695,6 +720,7 @@
     tracks: new Map(),
     activeIndex: -1,
     isPlaying: false,
+    shouldPlay: false,
     isLoading: true,
     query: '',
     loadToken: 0,
@@ -732,6 +758,7 @@
     trackCount: document.getElementById('track-count'),
     searchInput: document.getElementById('search-input'),
     status: document.getElementById('status'),
+    iosHint: document.getElementById('ios-hint'),
     trackList: document.getElementById('track-list'),
   };
 
@@ -788,8 +815,8 @@
 
   function showPlayerMessage(text, kind = ''){
     if (!text){
-      els.cover.hidden = false;
-      els.cover.textContent = 'Audio only';
+      els.cover.hidden = true;
+      els.cover.textContent = '';
       els.cover.className = 'player-cover';
       return;
     }
@@ -947,6 +974,7 @@
     els.nowTitle.textContent = track ? track.title : state.isLoading ? 'Loading playlist' : 'Pick a track';
     els.nowArtist.textContent = track ? track.author : 'YouTube';
     els.nowThumb.src = id ? thumbnail(id) : '';
+    els.nowThumb.classList.toggle('is-hidden', state.isPlaying);
     setPlayIcon();
 
     if ('mediaSession' in navigator && track && id){
@@ -966,12 +994,32 @@
       : 'none';
   }
 
+  function claimPlaybackSession(){
+    try {
+      if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
+    } catch {
+      window.__surErrors.push('Could not set audio session');
+    }
+  }
+
+  function resumePlaybackIfNeeded(){
+    if (!state.shouldPlay || !state.playerReady || !state.player) return;
+    claimPlaybackSession();
+    try {
+      if (state.player.playVideo) state.player.playVideo();
+    } catch {
+      window.__surErrors.push('Could not resume playback');
+    }
+  }
+
   function enableBackgroundPlayback(){
+    claimPlaybackSession();
     try {
       const iframe = state.player && state.player.getIframe ? state.player.getIframe() : null;
       if (iframe){
-        iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-        iframe.setAttribute('playsinline', '');
+        iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+        iframe.setAttribute('playsinline', 'true');
+        iframe.setAttribute('webkit-playsinline', 'true');
       }
     } catch {
       window.__surErrors.push('Could not enable background playback hints');
@@ -1021,6 +1069,7 @@
         rel: 0,
         modestbranding: 1,
         enablejsapi: 1,
+        fs: 1,
         origin: window.location.origin,
       },
       events: {
@@ -1056,6 +1105,7 @@
     state.videoIds = [];
     state.activeIndex = -1;
     state.isPlaying = false;
+    state.shouldPlay = false;
     state.isLoading = true;
     state.loadedVideoId = '';
     state.query = '';
@@ -1142,6 +1192,7 @@
     state.videoIds = [];
     state.activeIndex = -1;
     state.isPlaying = false;
+    state.shouldPlay = false;
     state.loadedVideoId = '';
     setStatus(message, 'error');
     showPlayerMessage(message, 'error');
@@ -1231,6 +1282,17 @@
     if (!state.isSeeking){
       els.seekBar.value = duration > 0 ? String(Math.min(1000, Math.round((current / duration) * 1000))) : '0';
     }
+    if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && duration > 0){
+      try {
+        navigator.mediaSession.setPositionState({
+          duration,
+          playbackRate: 1,
+          position: Math.min(duration, Math.max(0, current)),
+        });
+      } catch {
+        /* older WebKit rejects incomplete position state */
+      }
+    }
   }
 
   function seekBy(seconds){
@@ -1277,7 +1339,9 @@
     const id = state.videoIds[index];
     state.activeIndex = index;
     state.isPlaying = true;
+    state.shouldPlay = true;
     state.loadedVideoId = id;
+    claimPlaybackSession();
     setStatus(`${state.videoIds.length} tracks`, 'ok');
     showPlayerMessage('');
     els.seekBar.value = '0';
@@ -1296,6 +1360,7 @@
     } catch {
       setStatus('Could not play track', 'error');
       state.isPlaying = false;
+      state.shouldPlay = false;
       repaint();
     }
   }
@@ -1305,9 +1370,13 @@
     if (!state.videoIds.length) return;
 
     if (state.isPlaying){
+      state.shouldPlay = false;
       state.player.pauseVideo && state.player.pauseVideo();
       return;
     }
+
+    state.shouldPlay = true;
+    claimPlaybackSession();
 
     if (state.activeIndex < 0){
       playTrack(0);
@@ -1360,6 +1429,7 @@
         nextTrack();
         return;
       }
+      if (event.data === playerState.ENDED) state.shouldPlay = false;
     } else if (event.data === playerState.CUED){
       syncActiveIndex();
       state.isPlaying = false;
@@ -1438,8 +1508,16 @@
     }
   }
 
-  setMediaAction('play', togglePlay);
-  setMediaAction('pause', () => state.player && state.player.pauseVideo && state.player.pauseVideo());
+  setMediaAction('play', () => {
+    state.shouldPlay = true;
+    claimPlaybackSession();
+    if (state.isPlaying) return;
+    togglePlay();
+  });
+  setMediaAction('pause', () => {
+    state.shouldPlay = false;
+    if (state.player && state.player.pauseVideo) state.player.pauseVideo();
+  });
   setMediaAction('previoustrack', previousTrack);
   setMediaAction('nexttrack', nextTrack);
   setMediaAction('seekbackward', previousTrack);
@@ -1453,10 +1531,28 @@
     seekToTime(event.seekTime || 0);
   });
 
-  document.addEventListener('visibilitychange', () => {
+  function onForeground(){
     syncMediaSessionPlaybackState();
-    if (!document.hidden) updateProgress();
+    updateProgress();
+    resumePlaybackIfNeeded();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    claimPlaybackSession();
+    syncMediaSessionPlaybackState();
+    if (document.hidden){
+      resumePlaybackIfNeeded();
+      return;
+    }
+    onForeground();
   });
+  window.addEventListener('pageshow', onForeground);
+  window.addEventListener('focus', onForeground);
+  document.addEventListener('resume', onForeground);
+
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (els.iosHint && isIOS && /CriOS/.test(ua)) els.iosHint.classList.add('is-on');
 
   renderTabs();
   renderLoadingRows();
