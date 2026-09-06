@@ -118,6 +118,21 @@
     font-weight:700;
     line-height:1;
   }
+  .account{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex:0 0 auto;
+  }
+  .account-status{
+    color:var(--muted);
+    font-size:12px;
+    font-weight:800;
+    max-width:180px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
 
   .tab{
     border:1px solid var(--line);
@@ -784,6 +799,7 @@
     }
     .tabs-wrap{max-width:100%; width:100%}
     .tabs{max-width:100%; width:100%}
+    .account{width:100%; justify-content:space-between}
     .layout{
       padding:12px 12px 132px;
       min-height:auto;
@@ -803,6 +819,7 @@
       padding:0 12px;
       font-size:12px;
     }
+    .account-status{max-width:150px}
     .layout{padding:8px 8px 148px}
     .queue{
       min-height:auto;
@@ -889,6 +906,11 @@
       <nav class="tabs" id="tabs" aria-label="Playlists"></nav>
       <button class="tab tab-add" id="new-playlist-btn" type="button" aria-label="Create playlist" title="Create playlist">+</button>
     </div>
+    <div class="account">
+      <span class="account-status" id="account-status">Local</span>
+      <button class="tab" id="account-btn" type="button">Sign in</button>
+      <button class="tab" id="logout-btn" type="button" hidden>Log out</button>
+    </div>
   </header>
 
   <main class="layout">
@@ -972,6 +994,30 @@
   </form>
 </dialog>
 
+<dialog class="sheet" id="account-dialog" aria-labelledby="account-dialog-title">
+  <form class="sheet-form" id="account-form">
+    <h2 id="account-dialog-title">Account</h2>
+    <label class="field">
+      <span>Email</span>
+      <input id="auth-email" type="email" autocomplete="email" required>
+    </label>
+    <label class="field">
+      <span>Password</span>
+      <input id="auth-password" type="password" autocomplete="current-password" minlength="6" required>
+    </label>
+    <p class="sheet-hint" id="auth-message">Sign in or create an account to sync playlists.</p>
+    <div class="sheet-actions">
+      <button id="account-cancel" type="button">Cancel</button>
+      <button id="login-btn" type="button">Log in</button>
+      <button class="primary" id="signup-btn" type="button">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
+
 <script>
   const BUILTIN_PLAYLISTS = [
     { id: 'https://www.youtube.com/watch?v=KQ5oWUygSK0&list=PLJQleqNYzjsA', name: 'Hindi', color: '#ff7448' },
@@ -990,6 +1036,16 @@
   ];
 
   const CUSTOM_KEY = 'sur-custom-playlists-v1';
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyA53je7WRAtj9VhRC2YEBA7OKa0YGSLFWk',
+    authDomain: 'surmusic-5534a.firebaseapp.com',
+    projectId: 'surmusic-5534a',
+    storageBucket: 'surmusic-5534a.firebasestorage.app',
+    messagingSenderId: '595390454945',
+    appId: '1:595390454945:web:20986c9f36a349f1e924e0',
+    measurementId: 'G-6XQF8L3CZS',
+  };
+  const CLOUD_COLLECTION = 'sur-users';
   const PLAYLIST_COLORS = ['#ff7448', '#f3c04d', '#47d18c', '#6ea8ff', '#d28cff', '#ff8eb0'];
   function mainPlaylist(extraTracks = [], includeBuiltins = true){
     const tracks = Array.from(new Set([
@@ -1033,6 +1089,14 @@
     pendingAdd: null,
   };
 
+  const cloud = {
+    ready: false,
+    syncing: false,
+    auth: null,
+    db: null,
+    user: null,
+  };
+
   window.__surErrors = [];
   window.addEventListener('error', event => {
     window.__surErrors.push(event.message || 'Error');
@@ -1063,6 +1127,17 @@
     trackList: document.getElementById('track-list'),
     newPlaylistBtn: document.getElementById('new-playlist-btn'),
     deletePlaylistBtn: document.getElementById('delete-playlist-btn'),
+    accountStatus: document.getElementById('account-status'),
+    accountBtn: document.getElementById('account-btn'),
+    logoutBtn: document.getElementById('logout-btn'),
+    accountDialog: document.getElementById('account-dialog'),
+    accountForm: document.getElementById('account-form'),
+    accountCancel: document.getElementById('account-cancel'),
+    loginBtn: document.getElementById('login-btn'),
+    signupBtn: document.getElementById('signup-btn'),
+    authEmail: document.getElementById('auth-email'),
+    authPassword: document.getElementById('auth-password'),
+    authMessage: document.getElementById('auth-message'),
     searchResults: document.getElementById('search-results'),
     playlistDialog: document.getElementById('playlist-dialog'),
     playlistForm: document.getElementById('playlist-form'),
@@ -1071,11 +1146,145 @@
     newPlaylistUrl: document.getElementById('new-playlist-url'),
   };
 
+  function firebaseConfigured(){
+    return !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.authDomain && FIREBASE_CONFIG.projectId && FIREBASE_CONFIG.appId);
+  }
+
+  function storageKey(){
+    return cloud.user ? `${CUSTOM_KEY}:${cloud.user.uid}` : CUSTOM_KEY;
+  }
+
+  function updateAccountUi(){
+    if (!firebaseConfigured()){
+      els.accountStatus.textContent = 'Firebase off';
+      els.accountBtn.textContent = 'Setup';
+      els.accountBtn.hidden = false;
+      els.logoutBtn.hidden = true;
+      return;
+    }
+    if (cloud.user){
+      els.accountStatus.textContent = cloud.user.email || 'Signed in';
+      els.accountBtn.hidden = true;
+      els.logoutBtn.hidden = false;
+    } else {
+      els.accountStatus.textContent = 'Not signed in';
+      els.accountBtn.textContent = 'Sign in';
+      els.accountBtn.hidden = false;
+      els.logoutBtn.hidden = true;
+    }
+  }
+
+  function playlistPayload(){
+    return playlists.filter(item => item.custom).map(item => ({
+      custom: true,
+      id: item.id,
+      name: item.name,
+      color: item.color,
+      list: item.list || '',
+      tracks: Array.isArray(item.tracks) ? item.tracks.slice() : [],
+    }));
+  }
+
+  async function saveCloudPlaylists(payload = playlistPayload()){
+    if (!cloud.ready || !cloud.user || cloud.syncing) return;
+    try {
+      await cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).set({
+        playlists: payload,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch {
+      setStatus('Cloud sync failed', 'warn');
+    }
+  }
+
+  async function loadCloudPlaylists(){
+    if (!cloud.ready || !cloud.user) return;
+    let uploadAfterLoad = false;
+    cloud.syncing = true;
+    try {
+      const doc = await cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).get();
+      if (doc.exists && Array.isArray((doc.data() || {}).playlists)){
+        localStorage.setItem(storageKey(), JSON.stringify(doc.data().playlists));
+      } else {
+        uploadAfterLoad = true;
+      }
+      loadSavedPlaylists();
+      loadPlaylist(Math.min(state.playlistIndex, playlists.length - 1), { keepSearch: true });
+      setStatus('Synced', 'ok');
+    } catch {
+      loadSavedPlaylists();
+      setStatus('Cloud load failed', 'warn');
+    } finally {
+      cloud.syncing = false;
+      updateAccountUi();
+    }
+    if (uploadAfterLoad) saveCloudPlaylists();
+  }
+
+  function openAccountDialog(){
+    if (!firebaseConfigured()){
+      els.authMessage.textContent = 'Paste Firebase config in index.html first.';
+    } else {
+      els.authMessage.textContent = 'Sign in or create an account to sync playlists.';
+    }
+    els.authPassword.value = '';
+    if (typeof els.accountDialog.showModal === 'function') els.accountDialog.showModal();
+    else els.accountDialog.setAttribute('open', '');
+    window.setTimeout(() => els.authEmail.focus(), 30);
+  }
+
+  function closeAccountDialog(){
+    if (typeof els.accountDialog.close === 'function' && els.accountDialog.open) els.accountDialog.close();
+    else els.accountDialog.removeAttribute('open');
+  }
+
+  async function runAuth(mode){
+    if (!cloud.ready){
+      els.authMessage.textContent = 'Firebase config missing or SDK not loaded.';
+      return;
+    }
+    const email = els.authEmail.value.trim();
+    const password = els.authPassword.value;
+    if (!email || !password) return;
+    els.authMessage.textContent = mode === 'signup' ? 'Creating account...' : 'Signing in...';
+    try {
+      if (mode === 'signup') await cloud.auth.createUserWithEmailAndPassword(email, password);
+      else await cloud.auth.signInWithEmailAndPassword(email, password);
+      closeAccountDialog();
+    } catch (error) {
+      els.authMessage.textContent = error.message || 'Auth failed';
+    }
+  }
+
+  function initFirebase(){
+    updateAccountUi();
+    if (!firebaseConfigured() || !window.firebase) return;
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      cloud.auth = firebase.auth();
+      cloud.db = firebase.firestore();
+      cloud.ready = true;
+      cloud.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+      cloud.auth.onAuthStateChanged(user => {
+        cloud.user = user;
+        updateAccountUi();
+        if (user) loadCloudPlaylists();
+        else if (state.apiReady){
+          loadSavedPlaylists();
+          loadPlaylist(0, { keepSearch: true });
+        }
+      });
+    } catch {
+      cloud.ready = false;
+      updateAccountUi();
+    }
+  }
+
   function loadSavedPlaylists(){
     let savedMainTracks = null;
     const custom = [];
     try {
-      const parsed = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]');
+      const parsed = JSON.parse(localStorage.getItem(storageKey()) || '[]');
       if (Array.isArray(parsed)){
         parsed.forEach(item => {
           if (!item || !item.custom) return;
@@ -1103,10 +1312,11 @@
       tracks: Array.isArray(item.tracks) ? item.tracks.slice() : [],
     }));
     try {
-      localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
+      localStorage.setItem(storageKey(), JSON.stringify(custom));
     } catch {
       window.__surErrors.push('Could not save playlists');
     }
+    saveCloudPlaylists(custom);
   }
 
   function persistCurrentTracks(){
@@ -2333,6 +2543,20 @@
   els.prevBtn.addEventListener('click', previousTrack);
   els.newPlaylistBtn.addEventListener('click', openPlaylistDialog);
   els.deletePlaylistBtn.addEventListener('click', deleteCurrentPlaylist);
+  els.accountBtn.addEventListener('click', openAccountDialog);
+  els.logoutBtn.addEventListener('click', () => {
+    if (cloud.auth) cloud.auth.signOut();
+  });
+  els.accountCancel.addEventListener('click', event => {
+    event.preventDefault();
+    closeAccountDialog();
+  });
+  els.loginBtn.addEventListener('click', () => runAuth('login'));
+  els.signupBtn.addEventListener('click', () => runAuth('signup'));
+  els.accountForm.addEventListener('submit', event => {
+    event.preventDefault();
+    runAuth('login');
+  });
   els.playlistCancel.addEventListener('click', event => {
     event.preventDefault();
     closePlaylistDialog();
@@ -2433,6 +2657,7 @@
   const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (els.iosHint && isIOS && /CriOS/.test(ua)) els.iosHint.classList.add('is-on');
 
+  initFirebase();
   loadSavedPlaylists();
   renderTabs();
   renderLoadingRows();
