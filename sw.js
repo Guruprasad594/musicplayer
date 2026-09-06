@@ -1,4 +1,4 @@
-const CACHE = 'sur-shell-v22';
+const CACHE = 'sur-shell-v24';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

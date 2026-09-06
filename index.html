@@ -927,6 +927,10 @@
         <span class="scope">Music</span>
       </div>
       <h2 id="account-dialog-title">Sign in to continue</h2>
+      <label class="field" id="auth-name-field" hidden>
+        <span>Name</span>
+        <input id="auth-name" type="text" autocomplete="name" maxlength="40">
+      </label>
       <label class="field">
         <span>Email</span>
         <input id="auth-email" type="email" autocomplete="email" required>
@@ -1125,6 +1129,7 @@
     db: null,
     user: null,
   };
+  let authMode = 'login';
 
   window.__surErrors = [];
   window.addEventListener('error', event => {
@@ -1162,8 +1167,11 @@
     app: document.getElementById('app'),
     loginGate: document.getElementById('login-gate'),
     accountForm: document.getElementById('account-form'),
+    accountTitle: document.getElementById('account-dialog-title'),
     loginBtn: document.getElementById('login-btn'),
     signupBtn: document.getElementById('signup-btn'),
+    authNameField: document.getElementById('auth-name-field'),
+    authName: document.getElementById('auth-name'),
     authEmail: document.getElementById('auth-email'),
     authPassword: document.getElementById('auth-password'),
     authMessage: document.getElementById('auth-message'),
@@ -1180,7 +1188,7 @@
   }
 
   function storageKey(){
-    return cloud.user ? `${CUSTOM_KEY}:${cloud.user.uid}` : CUSTOM_KEY;
+    return cloud.user ? `${CUSTOM_KEY}:${cloud.user.uid}` : `${CUSTOM_KEY}:signed-out`;
   }
 
   function updateAccountUi(){
@@ -1191,7 +1199,7 @@
       return;
     }
     if (cloud.user){
-      els.accountStatus.textContent = cloud.user.email || 'Signed in';
+      els.accountStatus.textContent = cloud.user.displayName || cloud.user.email || 'Signed in';
       els.accountBtn.hidden = true;
       els.logoutBtn.hidden = false;
     } else {
@@ -1213,10 +1221,14 @@
 
   function lockApp(){
     stopPlayback();
+    const previousMessage = els.authMessage.textContent;
+    setAuthMode('login');
     els.app.hidden = true;
     els.loginGate.hidden = false;
     els.authPassword.value = '';
-    if (els.authMessage.textContent === 'Checking your session...'){
+    if (previousMessage && previousMessage !== 'Checking your session...' && previousMessage !== 'Sign in or create an account to use Sur.'){
+      els.authMessage.textContent = previousMessage;
+    } else if (els.authMessage.textContent === 'Checking your session...'){
       els.authMessage.textContent = 'Sign in or create an account to use Sur.';
     }
     window.setTimeout(() => els.authEmail.focus(), 30);
@@ -1225,6 +1237,31 @@
   function unlockApp(){
     els.loginGate.hidden = true;
     els.app.hidden = false;
+  }
+
+  function resetAccountState(){
+    if (state.pollTimer){
+      clearInterval(state.pollTimer);
+      state.pollTimer = 0;
+    }
+    stopPlayback();
+    playlists = [mainPlaylist([], false)];
+    state.playlistIndex = 0;
+    state.videoIds = [];
+    state.tracks = new Map();
+    state.activeIndex = -1;
+    state.loadedVideoId = '';
+    state.playQueue = [];
+    state.isLoading = false;
+    state.loadToken += 1;
+    state.searchItems = [];
+    state.pendingAdd = null;
+    if (els.searchInput) els.searchInput.value = '';
+    if (els.searchResults) els.searchResults.replaceChildren();
+    setStatus('Loading account');
+    showPlayerMessage('');
+    updateProgress();
+    repaint();
   }
 
   function ensureYoutubeApi(){
@@ -1278,26 +1315,36 @@
 
   async function loadCloudPlaylists(){
     if (!cloud.ready || !cloud.user) return;
-    let uploadAfterLoad = false;
+    const uid = cloud.user.uid;
+    const docRef = cloud.db.collection(CLOUD_COLLECTION).doc(uid);
     cloud.syncing = true;
     try {
-      const doc = await cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).get();
+      const doc = await docRef.get();
+      if (!cloud.user || cloud.user.uid !== uid) return;
       if (doc.exists && Array.isArray((doc.data() || {}).playlists)){
         localStorage.setItem(storageKey(), JSON.stringify(doc.data().playlists));
+        loadSavedPlaylists();
       } else {
-        uploadAfterLoad = true;
+        playlists = [mainPlaylist([], false)];
+        state.playlistIndex = 0;
+        localStorage.setItem(storageKey(), JSON.stringify(playlistPayload()));
+        await docRef.set({
+          playlists: playlistPayload(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
       }
-      loadSavedPlaylists();
       loadPlaylist(Math.min(state.playlistIndex, playlists.length - 1), { keepSearch: true });
       setStatus('Synced', 'ok');
     } catch {
+      if (!cloud.user || cloud.user.uid !== uid) return;
       loadSavedPlaylists();
       setStatus('Cloud load failed', 'warn');
     } finally {
-      cloud.syncing = false;
-      updateAccountUi();
+      if (cloud.user && cloud.user.uid === uid){
+        cloud.syncing = false;
+        updateAccountUi();
+      }
     }
-    if (uploadAfterLoad) saveCloudPlaylists();
   }
 
   function openAccountDialog(){
@@ -1308,18 +1355,57 @@
     if (cloud.user) unlockApp();
   }
 
+  function setAuthMode(mode){
+    authMode = mode;
+    const signup = mode === 'signup';
+    els.accountTitle.textContent = signup ? 'Create your account' : 'Sign in to continue';
+    els.authNameField.hidden = !signup;
+    els.authName.required = signup;
+    els.authPassword.autocomplete = signup ? 'new-password' : 'current-password';
+    els.authMessage.textContent = signup ? 'Enter your name, email, and password.' : 'Sign in or create an account to use Sur.';
+    if (signup) window.setTimeout(() => els.authName.focus(), 30);
+  }
+
   async function runAuth(mode){
     if (!cloud.ready){
       els.authMessage.textContent = 'Firebase config missing or SDK not loaded.';
       return;
     }
+    if (mode === 'login' && authMode !== 'login'){
+      setAuthMode('login');
+      return;
+    }
+    if (mode === 'signup' && authMode !== 'signup'){
+      setAuthMode('signup');
+      return;
+    }
     const email = els.authEmail.value.trim();
     const password = els.authPassword.value;
+    const name = els.authName.value.trim();
+    if (mode === 'signup' && !name){
+      setAuthMode('signup');
+      els.authMessage.textContent = 'Enter your name to create account.';
+      return;
+    }
     if (!email || !password) return;
     els.authMessage.textContent = mode === 'signup' ? 'Creating account...' : 'Signing in...';
     try {
-      if (mode === 'signup') await cloud.auth.createUserWithEmailAndPassword(email, password);
-      else await cloud.auth.signInWithEmailAndPassword(email, password);
+      if (mode === 'signup'){
+        const credential = await cloud.auth.createUserWithEmailAndPassword(email, password);
+        if (credential.user && credential.user.updateProfile){
+          await credential.user.updateProfile({ displayName: name });
+        }
+        await cloud.db.collection(CLOUD_COLLECTION).doc(credential.user.uid).set({
+          name,
+          email,
+          playlists: playlistPayload(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        updateAccountUi();
+      } else {
+        await cloud.auth.signInWithEmailAndPassword(email, password);
+      }
       closeAccountDialog();
     } catch (error) {
       els.authMessage.textContent = error.message || 'Auth failed';
@@ -1340,6 +1426,9 @@
       cloud.ready = true;
       cloud.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
       cloud.auth.onAuthStateChanged(async user => {
+        const previousUid = cloud.user ? cloud.user.uid : '';
+        const nextUid = user ? user.uid : '';
+        if (previousUid !== nextUid) resetAccountState();
         cloud.user = user;
         updateAccountUi();
         if (user){
@@ -1377,7 +1466,7 @@
       savedMainTracks = null;
       custom.length = 0;
     }
-    playlists = [mainPlaylist(savedMainTracks || [], savedMainTracks === null)].concat(custom);
+    playlists = [mainPlaylist(savedMainTracks || [], !cloud.user && savedMainTracks === null)].concat(custom);
   }
 
   function saveCustomPlaylists(){
