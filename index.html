@@ -1199,6 +1199,16 @@
   };
   const CLOUD_COLLECTION = 'sur-users';
   const RECOMMEND_LIMIT = 30;
+  const RECOMMEND_QUERIES = [
+    'latest Kannada songs official music video',
+    'new Kannada songs official lyrical video',
+    'latest Hindi songs official music video',
+    'new Bollywood songs official music video',
+    'latest Indian songs official video',
+    'new Tamil songs official music video',
+    'new Telugu songs official music video',
+    'latest Malayalam songs official music video',
+  ];
   const PLAYLIST_COLORS = ['#ff7448', '#f3c04d', '#47d18c', '#6ea8ff', '#d28cff', '#ff8eb0'];
   function mainPlaylist(extraTracks = [], includeBuiltins = true){
     const tracks = Array.from(new Set([
@@ -1239,6 +1249,11 @@
     searchTimer: 0,
     searchToken: 0,
     searchItems: [],
+    recommendItems: [],
+    recommendLoaded: false,
+    recommendLoading: false,
+    recommendError: '',
+    recommendToken: 0,
     recommendHydrating: false,
     pendingAdd: null,
     ytRequested: false,
@@ -1378,6 +1393,11 @@
     state.isLoading = false;
     state.loadToken += 1;
     state.searchItems = [];
+    state.recommendItems = [];
+    state.recommendLoaded = false;
+    state.recommendLoading = false;
+    state.recommendError = '';
+    state.recommendToken += 1;
     state.recommendHydrating = false;
     state.pendingAdd = null;
     if (els.searchInput) els.searchInput.value = '';
@@ -1458,6 +1478,10 @@
         }, { merge: true });
       }
       loadPlaylist(Math.min(state.playlistIndex, playlists.length - 1), { keepSearch: true });
+      state.recommendItems = [];
+      state.recommendLoaded = false;
+      state.recommendError = '';
+      loadFreshRecommendations(true);
       setStatus('Synced', 'ok');
     } catch {
       if (!cloud.user || cloud.user.uid !== uid) return;
@@ -1810,58 +1834,92 @@
     els.trackList.replaceChildren(empty);
   }
 
-  function recommendationIds(){
-    const ids = [];
-    const seen = new Set();
-    const add = id => {
-      if (!id || seen.has(id)) return;
-      seen.add(id);
-      ids.push(id);
-    };
+  function playlistIdSet(){
+    const ids = new Set();
     playlists.forEach(playlist => {
-      if (Array.isArray(playlist.tracks)) playlist.tracks.forEach(add);
+      if (Array.isArray(playlist.tracks)) playlist.tracks.forEach(id => ids.add(id));
     });
-    add('KQ5oWUygSK0');
-    BUILTIN_PLAYLISTS.forEach(playlist => {
-      if (Array.isArray(playlist.tracks)) playlist.tracks.forEach(add);
-    });
-    return ids.slice(0, RECOMMEND_LIMIT);
+    state.videoIds.forEach(id => ids.add(id));
+    return ids;
   }
 
-  function recommendationTrack(id, index){
-    return state.tracks.get(id) || {
-      id,
-      title: `Song ${index + 1}`,
-      author: 'YouTube',
-      ready: false,
-      unavailable: false,
-    };
+  function shuffle(items){
+    const copy = items.slice();
+    for (let index = copy.length - 1; index > 0; index -= 1){
+      const swap = Math.floor(Math.random() * (index + 1));
+      [copy[index], copy[swap]] = [copy[swap], copy[index]];
+    }
+    return copy;
   }
 
-  function hydrateRecommendationMetadata(ids){
-    if (state.recommendHydrating) return;
-    const token = state.loadToken;
-    const missing = ids
-      .filter(id => {
-        const track = state.tracks.get(id);
-        return !track || (!track.ready && !track.loading);
-      })
-      .slice(0, 18);
-    if (!missing.length) return;
-    state.recommendHydrating = true;
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(4, missing.length) }, async () => {
-      while (cursor < missing.length && token === state.loadToken){
-        const index = ids.indexOf(missing[cursor]);
-        const id = missing[cursor];
-        cursor += 1;
-        await loadTrackMetadata(id, index, token);
+  function renderRecommendationMessage(text){
+    els.recommendGrid.replaceChildren();
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = text;
+    els.recommendGrid.append(empty);
+  }
+
+  async function searchLatestSongs(query){
+    const q = `${query} ${new Date().getFullYear()}`;
+    const endpoints = [
+      { url: `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(q)}&type=video&sort_by=date`, kind: 'invidious' },
+      { url: `https://invidious.fdn.fr/api/v1/search?q=${encodeURIComponent(q)}&type=video&sort_by=date`, kind: 'invidious' },
+      { url: `https://yt.lemnoslife.com/noKey/search?part=snippet&type=video&maxResults=12&order=date&q=${encodeURIComponent(q)}`, kind: 'youtube' },
+    ];
+    const tasks = endpoints.map(async endpoint => {
+      const data = await fetchJson(endpoint.url);
+      const items = normalizeSearchResults(data, endpoint.kind);
+      if (!items.length) throw new Error('empty');
+      return items;
+    });
+    try {
+      return await Promise.any(tasks);
+    } catch {
+      return searchYouTube(q);
+    }
+  }
+
+  async function loadFreshRecommendations(force = false){
+    if (!cloud.user || (state.recommendLoading && !force)) return;
+    if (!force && state.recommendLoaded) return;
+    const uid = cloud.user.uid;
+    const token = state.recommendToken + 1;
+    state.recommendToken = token;
+    state.recommendLoading = true;
+    state.recommendError = '';
+    renderRecommendations();
+
+    const banned = playlistIdSet();
+    const seen = new Set(banned);
+    const found = [];
+    const queries = shuffle(RECOMMEND_QUERIES).slice(0, 5);
+
+    try {
+      const batches = await Promise.allSettled(queries.map(searchLatestSongs));
+      if (token !== state.recommendToken || !cloud.user || cloud.user.uid !== uid) return;
+      shuffle(batches).forEach(batch => {
+        if (batch.status !== 'fulfilled') return;
+        shuffle(batch.value).forEach(item => {
+          if (!item || !item.id || seen.has(item.id)) return;
+          seen.add(item.id);
+          found.push(item);
+        });
+      });
+      state.recommendItems = shuffle(found).slice(0, RECOMMEND_LIMIT);
+      state.recommendLoaded = true;
+      if (!state.recommendItems.length) state.recommendError = 'No new latest songs found right now.';
+      state.recommendItems.forEach(rememberTrack);
+    } catch {
+      if (token !== state.recommendToken || !cloud.user || cloud.user.uid !== uid) return;
+      state.recommendError = 'Could not load latest songs.';
+      state.recommendLoaded = true;
+    } finally {
+      if (token === state.recommendToken){
+        state.recommendLoading = false;
+        renderRecommendations();
       }
-    });
-    Promise.allSettled(workers).then(() => {
-      state.recommendHydrating = false;
-      if (token === state.loadToken) renderRecommendations();
-    });
+    }
   }
 
   function playRecommended(item){
@@ -1875,46 +1933,44 @@
       els.recommendGrid.replaceChildren();
       return;
     }
-    const ids = recommendationIds();
-    els.recommendGrid.replaceChildren();
-    if (!ids.length){
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'Search and add songs to build recommendations.';
-      els.recommendGrid.append(empty);
+    if (!state.recommendLoaded && !state.recommendLoading){
+      loadFreshRecommendations();
+    }
+    const banned = playlistIdSet();
+    const items = state.recommendItems.filter(item => item && item.id && !banned.has(item.id));
+    if (!items.length){
+      renderRecommendationMessage(state.recommendLoading ? 'Finding latest songs...' : (state.recommendError || 'No new latest songs found right now.'));
       return;
     }
 
+    els.recommendGrid.replaceChildren();
     const fragment = document.createDocumentFragment();
-    ids.forEach((id, index) => {
-      const track = recommendationTrack(id, index);
-      const item = { id, title: track.title, author: track.author };
-      const added = state.videoIds.includes(id);
+    items.forEach(item => {
       const card = document.createElement('div');
-      card.className = `recommend-card ${state.loadedVideoId === id ? 'active' : ''}`;
+      card.className = `recommend-card ${state.loadedVideoId === item.id ? 'active' : ''}`;
       card.setAttribute('role', 'button');
       card.tabIndex = 0;
-      card.setAttribute('aria-label', `Play ${track.title}`);
+      card.setAttribute('aria-label', `Play ${item.title}`);
 
       const image = document.createElement('img');
       image.className = 'recommend-thumb';
       image.alt = '';
       image.loading = 'lazy';
-      image.src = thumbnail(id);
+      image.src = thumbnail(item.id);
 
       const copy = document.createElement('span');
       copy.className = 'recommend-copy';
       const title = document.createElement('strong');
       title.className = 'recommend-title';
-      title.textContent = track.title;
+      title.textContent = item.title;
       const author = document.createElement('span');
       author.className = 'recommend-artist';
-      author.textContent = track.author;
+      author.textContent = item.author;
       copy.append(title, author);
 
       const actions = createMoreMenu([
         { label: 'Queue', onClick: () => queueTrack(item) },
-        { label: added ? 'Added' : 'Add', kind: 'ok', onClick: () => { if (!added) addTrack(item); } },
+        { label: 'Add', kind: 'ok', onClick: () => addTrack(item) },
       ]);
 
       card.append(image, copy, actions);
@@ -1928,7 +1984,6 @@
       fragment.append(card);
     });
     els.recommendGrid.append(fragment);
-    hydrateRecommendationMetadata(ids);
   }
 
   function closeMenus(except = null){
