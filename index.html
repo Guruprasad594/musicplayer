@@ -57,6 +57,29 @@
     display:flex;
     flex-direction:column;
   }
+  .app[hidden]{display:none !important}
+
+  .login-gate{
+    min-height:100vh;
+    min-height:100dvh;
+    display:grid;
+    place-items:center;
+    padding:24px 16px;
+  }
+  .login-gate[hidden]{display:none !important}
+  .login-card{
+    width:min(420px, 100%);
+    border:1px solid rgba(255,255,255,.1);
+    background:rgba(23,23,23,.94);
+    border-radius:16px;
+    box-shadow:0 24px 64px rgba(0,0,0,.45);
+  }
+  .login-brand{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:8px;
+  }
 
   .topbar{
     display:flex;
@@ -896,7 +919,32 @@
 </style>
 </head>
 <body>
-<div class="app">
+<section class="login-gate" id="login-gate" aria-label="Sign in">
+  <div class="login-card sheet">
+    <form class="sheet-form" id="account-form">
+      <div class="login-brand">
+        <span class="mark">Sur</span>
+        <span class="scope">Music</span>
+      </div>
+      <h2 id="account-dialog-title">Sign in to continue</h2>
+      <label class="field">
+        <span>Email</span>
+        <input id="auth-email" type="email" autocomplete="email" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="6" required>
+      </label>
+      <p class="sheet-hint" id="auth-message">Checking your session...</p>
+      <div class="sheet-actions">
+        <button id="login-btn" type="submit">Log in</button>
+        <button class="primary" id="signup-btn" type="button">Create account</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<div class="app" id="app" hidden>
   <header class="topbar">
     <div class="brand">
       <span class="mark">Sur</span>
@@ -908,7 +956,7 @@
     </div>
     <div class="account">
       <span class="account-status" id="account-status">Local</span>
-      <button class="tab" id="account-btn" type="button">Sign in</button>
+      <button class="tab" id="account-btn" type="button" hidden>Sign in</button>
       <button class="tab" id="logout-btn" type="button" hidden>Log out</button>
     </div>
   </header>
@@ -994,26 +1042,6 @@
   </form>
 </dialog>
 
-<dialog class="sheet" id="account-dialog" aria-labelledby="account-dialog-title">
-  <form class="sheet-form" id="account-form">
-    <h2 id="account-dialog-title">Account</h2>
-    <label class="field">
-      <span>Email</span>
-      <input id="auth-email" type="email" autocomplete="email" required>
-    </label>
-    <label class="field">
-      <span>Password</span>
-      <input id="auth-password" type="password" autocomplete="current-password" minlength="6" required>
-    </label>
-    <p class="sheet-hint" id="auth-message">Sign in or create an account to sync playlists.</p>
-    <div class="sheet-actions">
-      <button id="account-cancel" type="button">Cancel</button>
-      <button id="login-btn" type="button">Log in</button>
-      <button class="primary" id="signup-btn" type="button">Create</button>
-    </div>
-  </form>
-</dialog>
-
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
@@ -1037,7 +1065,7 @@
 
   const CUSTOM_KEY = 'sur-custom-playlists-v1';
   const FIREBASE_CONFIG = {
-    apiKey: 'AIzaSyA53je7WRAtj9VhRC2YEBA7OKa0YGSLFWk',
+    apiKey: 'AIzaSyA53je7WRAtj9VhRC2YEBA7OKa0YGsLFWk',
     authDomain: 'surmusic-5534a.firebaseapp.com',
     projectId: 'surmusic-5534a',
     storageBucket: 'surmusic-5534a.firebasestorage.app',
@@ -1087,6 +1115,7 @@
     searchToken: 0,
     searchItems: [],
     pendingAdd: null,
+    ytRequested: false,
   };
 
   const cloud = {
@@ -1130,9 +1159,9 @@
     accountStatus: document.getElementById('account-status'),
     accountBtn: document.getElementById('account-btn'),
     logoutBtn: document.getElementById('logout-btn'),
-    accountDialog: document.getElementById('account-dialog'),
+    app: document.getElementById('app'),
+    loginGate: document.getElementById('login-gate'),
     accountForm: document.getElementById('account-form'),
-    accountCancel: document.getElementById('account-cancel'),
     loginBtn: document.getElementById('login-btn'),
     signupBtn: document.getElementById('signup-btn'),
     authEmail: document.getElementById('auth-email'),
@@ -1157,8 +1186,7 @@
   function updateAccountUi(){
     if (!firebaseConfigured()){
       els.accountStatus.textContent = 'Firebase off';
-      els.accountBtn.textContent = 'Setup';
-      els.accountBtn.hidden = false;
+      els.accountBtn.hidden = true;
       els.logoutBtn.hidden = true;
       return;
     }
@@ -1168,10 +1196,61 @@
       els.logoutBtn.hidden = false;
     } else {
       els.accountStatus.textContent = 'Not signed in';
-      els.accountBtn.textContent = 'Sign in';
-      els.accountBtn.hidden = false;
+      els.accountBtn.hidden = true;
       els.logoutBtn.hidden = true;
     }
+  }
+
+  function stopPlayback(){
+    state.shouldPlay = false;
+    state.isPlaying = false;
+    try {
+      if (state.player && state.player.pauseVideo) state.player.pauseVideo();
+    } catch {
+      window.__surErrors.push('Could not pause on lock');
+    }
+  }
+
+  function lockApp(){
+    stopPlayback();
+    els.app.hidden = true;
+    els.loginGate.hidden = false;
+    els.authPassword.value = '';
+    if (els.authMessage.textContent === 'Checking your session...'){
+      els.authMessage.textContent = 'Sign in or create an account to use Sur.';
+    }
+    window.setTimeout(() => els.authEmail.focus(), 30);
+  }
+
+  function unlockApp(){
+    els.loginGate.hidden = true;
+    els.app.hidden = false;
+  }
+
+  function ensureYoutubeApi(){
+    if (state.ytRequested){
+      if (state.apiReady && cloud.user) loadPlaylist(state.playlistIndex);
+      return;
+    }
+    state.ytRequested = true;
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    tag.onerror = () => {
+      state.apiReady = false;
+      state.playerReady = false;
+      state.isLoading = false;
+      setStatus('YouTube unavailable', 'error');
+      showPlayerMessage('YouTube unavailable', 'error');
+      repaint();
+    };
+    document.body.appendChild(tag);
+    window.setTimeout(() => {
+      if (!state.apiReady && cloud.user){
+        setStatus('Still connecting');
+        showPlayerMessage('Connecting to YouTube');
+      }
+    }, 5000);
   }
 
   function playlistPayload(){
@@ -1222,20 +1301,11 @@
   }
 
   function openAccountDialog(){
-    if (!firebaseConfigured()){
-      els.authMessage.textContent = 'Paste Firebase config in index.html first.';
-    } else {
-      els.authMessage.textContent = 'Sign in or create an account to sync playlists.';
-    }
-    els.authPassword.value = '';
-    if (typeof els.accountDialog.showModal === 'function') els.accountDialog.showModal();
-    else els.accountDialog.setAttribute('open', '');
-    window.setTimeout(() => els.authEmail.focus(), 30);
+    lockApp();
   }
 
   function closeAccountDialog(){
-    if (typeof els.accountDialog.close === 'function' && els.accountDialog.open) els.accountDialog.close();
-    else els.accountDialog.removeAttribute('open');
+    if (cloud.user) unlockApp();
   }
 
   async function runAuth(mode){
@@ -1258,25 +1328,33 @@
 
   function initFirebase(){
     updateAccountUi();
-    if (!firebaseConfigured() || !window.firebase) return;
+    if (!firebaseConfigured() || !window.firebase){
+      els.authMessage.textContent = 'Firebase config missing or SDK not loaded.';
+      lockApp();
+      return;
+    }
     try {
       firebase.initializeApp(FIREBASE_CONFIG);
       cloud.auth = firebase.auth();
       cloud.db = firebase.firestore();
       cloud.ready = true;
       cloud.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
-      cloud.auth.onAuthStateChanged(user => {
+      cloud.auth.onAuthStateChanged(async user => {
         cloud.user = user;
         updateAccountUi();
-        if (user) loadCloudPlaylists();
-        else if (state.apiReady){
-          loadSavedPlaylists();
-          loadPlaylist(0, { keepSearch: true });
+        if (user){
+          unlockApp();
+          await loadCloudPlaylists();
+          ensureYoutubeApi();
+        } else {
+          lockApp();
         }
       });
     } catch {
       cloud.ready = false;
+      els.authMessage.textContent = 'Could not start Firebase.';
       updateAccountUi();
+      lockApp();
     }
   }
 
@@ -2205,7 +2283,7 @@
 
   function onYouTubeIframeAPIReady(){
     state.apiReady = true;
-    loadPlaylist(state.playlistIndex);
+    if (cloud.user) loadPlaylist(state.playlistIndex);
   }
 
   window.onYouTubeIframeAPIReady = onYouTubeIframeAPIReady;
@@ -2547,11 +2625,10 @@
   els.logoutBtn.addEventListener('click', () => {
     if (cloud.auth) cloud.auth.signOut();
   });
-  els.accountCancel.addEventListener('click', event => {
+  els.loginBtn.addEventListener('click', event => {
     event.preventDefault();
-    closeAccountDialog();
+    runAuth('login');
   });
-  els.loginBtn.addEventListener('click', () => runAuth('login'));
   els.signupBtn.addEventListener('click', () => runAuth('signup'));
   els.accountForm.addEventListener('submit', event => {
     event.preventDefault();
@@ -2658,30 +2735,6 @@
   if (els.iosHint && isIOS && /CriOS/.test(ua)) els.iosHint.classList.add('is-on');
 
   initFirebase();
-  loadSavedPlaylists();
-  renderTabs();
-  renderLoadingRows();
-  renderShell();
-
-  const tag = document.createElement('script');
-  tag.src = 'https://www.youtube.com/iframe_api';
-  tag.async = true;
-  tag.onerror = () => {
-    state.apiReady = false;
-    state.playerReady = false;
-    state.isLoading = false;
-    setStatus('YouTube unavailable', 'error');
-    showPlayerMessage('YouTube unavailable', 'error');
-    repaint();
-  };
-  document.body.appendChild(tag);
-
-  window.setTimeout(() => {
-    if (!state.apiReady){
-      setStatus('Still connecting');
-      showPlayerMessage('Connecting to YouTube');
-    }
-  }, 5000);
 
   if ('serviceWorker' in navigator){
     window.addEventListener('load', () => {
