@@ -388,6 +388,97 @@
     fill:currentColor;
   }
 
+  .home{
+    min-height:calc(100dvh - 260px);
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    padding:16px 4px 18px;
+  }
+  .home-head{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:12px;
+    padding:0 4px;
+  }
+  .home-title{
+    margin:0;
+    font-size:clamp(30px, 6vh, 54px);
+    line-height:1;
+    font-weight:950;
+    letter-spacing:0;
+  }
+  .recommend-grid{
+    flex:1;
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));
+    gap:10px;
+    align-content:start;
+  }
+  .recommend-grid > .empty{grid-column:1 / -1}
+  .recommend-card{
+    position:relative;
+    min-width:0;
+    min-height:212px;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:var(--radius);
+    background:rgba(23,23,23,.8);
+    color:inherit;
+    cursor:pointer;
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+    padding:8px;
+    text-align:left;
+    overflow:visible;
+    transition:background .14s ease, border-color .14s ease, transform .14s ease;
+  }
+  .recommend-card:hover{background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.14)}
+  .recommend-card:active{transform:translateY(1px)}
+  .recommend-card.active{border-color:color-mix(in srgb, var(--accent), transparent 34%); background:rgba(255,255,255,.09)}
+  .recommend-card .item-actions{
+    position:absolute;
+    right:10px;
+    top:10px;
+    z-index:4;
+  }
+  .recommend-card .more-btn{
+    background:rgba(0,0,0,.48);
+    border-color:rgba(255,255,255,.18);
+  }
+  .recommend-thumb{
+    width:100%;
+    aspect-ratio:16 / 9;
+    object-fit:cover;
+    border-radius:6px;
+    background:var(--panel-2);
+  }
+  .recommend-copy{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+  }
+  .recommend-title{
+    font-size:14px;
+    line-height:1.25;
+    font-weight:900;
+    overflow:hidden;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+  }
+  .recommend-card.active .recommend-title{color:var(--accent)}
+  .recommend-artist{
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.35;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+
   .queue{
     display:flex;
     flex-direction:column;
@@ -827,6 +918,8 @@
       padding:12px 12px 132px;
       min-height:auto;
     }
+    .home{min-height:calc(100dvh - 250px)}
+    .recommend-grid{grid-template-columns:repeat(auto-fill, minmax(150px, 1fr))}
     .queue{min-height:520px}
   }
 
@@ -844,6 +937,23 @@
     }
     .account-status{max-width:150px}
     .layout{padding:8px 8px 148px}
+    .home{
+      min-height:calc(100dvh - 230px);
+      gap:10px;
+      padding:10px 0 14px;
+    }
+    .home-title{font-size:34px}
+    .recommend-grid{
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:8px;
+    }
+    .recommend-card{
+      min-height:166px;
+      padding:7px;
+      gap:7px;
+    }
+    .recommend-title{font-size:13px}
+    .recommend-artist{font-size:11px}
     .queue{
       min-height:auto;
       border-radius:6px;
@@ -1000,6 +1110,16 @@
       </div>
     </section>
 
+    <section class="home" aria-label="Recommended songs">
+      <div class="home-head">
+        <div>
+          <span class="eyebrow">Home</span>
+          <h1 class="home-title">Recommended</h1>
+        </div>
+      </div>
+      <div class="recommend-grid" id="recommend-grid"></div>
+    </section>
+
     <aside class="queue" aria-label="Queue">
       <div class="queue-head">
         <div>
@@ -1078,6 +1198,7 @@
     measurementId: 'G-6XQF8L3CZS',
   };
   const CLOUD_COLLECTION = 'sur-users';
+  const RECOMMEND_LIMIT = 30;
   const PLAYLIST_COLORS = ['#ff7448', '#f3c04d', '#47d18c', '#6ea8ff', '#d28cff', '#ff8eb0'];
   function mainPlaylist(extraTracks = [], includeBuiltins = true){
     const tracks = Array.from(new Set([
@@ -1118,6 +1239,7 @@
     searchTimer: 0,
     searchToken: 0,
     searchItems: [],
+    recommendHydrating: false,
     pendingAdd: null,
     ytRequested: false,
   };
@@ -1159,6 +1281,7 @@
     status: document.getElementById('status'),
     iosHint: document.getElementById('ios-hint'),
     trackList: document.getElementById('track-list'),
+    recommendGrid: document.getElementById('recommend-grid'),
     newPlaylistBtn: document.getElementById('new-playlist-btn'),
     deletePlaylistBtn: document.getElementById('delete-playlist-btn'),
     accountStatus: document.getElementById('account-status'),
@@ -1255,6 +1378,7 @@
     state.isLoading = false;
     state.loadToken += 1;
     state.searchItems = [];
+    state.recommendHydrating = false;
     state.pendingAdd = null;
     if (els.searchInput) els.searchInput.value = '';
     if (els.searchResults) els.searchResults.replaceChildren();
@@ -1428,8 +1552,8 @@
       cloud.auth.onAuthStateChanged(async user => {
         const previousUid = cloud.user ? cloud.user.uid : '';
         const nextUid = user ? user.uid : '';
-        if (previousUid !== nextUid) resetAccountState();
         cloud.user = user;
+        if (previousUid !== nextUid) resetAccountState();
         updateAccountUi();
         if (user){
           unlockApp();
@@ -1686,6 +1810,127 @@
     els.trackList.replaceChildren(empty);
   }
 
+  function recommendationIds(){
+    const ids = [];
+    const seen = new Set();
+    const add = id => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+    playlists.forEach(playlist => {
+      if (Array.isArray(playlist.tracks)) playlist.tracks.forEach(add);
+    });
+    add('KQ5oWUygSK0');
+    BUILTIN_PLAYLISTS.forEach(playlist => {
+      if (Array.isArray(playlist.tracks)) playlist.tracks.forEach(add);
+    });
+    return ids.slice(0, RECOMMEND_LIMIT);
+  }
+
+  function recommendationTrack(id, index){
+    return state.tracks.get(id) || {
+      id,
+      title: `Song ${index + 1}`,
+      author: 'YouTube',
+      ready: false,
+      unavailable: false,
+    };
+  }
+
+  function hydrateRecommendationMetadata(ids){
+    if (state.recommendHydrating) return;
+    const token = state.loadToken;
+    const missing = ids
+      .filter(id => {
+        const track = state.tracks.get(id);
+        return !track || (!track.ready && !track.loading);
+      })
+      .slice(0, 18);
+    if (!missing.length) return;
+    state.recommendHydrating = true;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(4, missing.length) }, async () => {
+      while (cursor < missing.length && token === state.loadToken){
+        const index = ids.indexOf(missing[cursor]);
+        const id = missing[cursor];
+        cursor += 1;
+        await loadTrackMetadata(id, index, token);
+      }
+    });
+    Promise.allSettled(workers).then(() => {
+      state.recommendHydrating = false;
+      if (token === state.loadToken) renderRecommendations();
+    });
+  }
+
+  function playRecommended(item){
+    rememberTrack(item);
+    playVideoId(item.id, state.videoIds.indexOf(item.id));
+  }
+
+  function renderRecommendations(){
+    if (!els.recommendGrid) return;
+    if (!cloud.user){
+      els.recommendGrid.replaceChildren();
+      return;
+    }
+    const ids = recommendationIds();
+    els.recommendGrid.replaceChildren();
+    if (!ids.length){
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Search and add songs to build recommendations.';
+      els.recommendGrid.append(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    ids.forEach((id, index) => {
+      const track = recommendationTrack(id, index);
+      const item = { id, title: track.title, author: track.author };
+      const added = state.videoIds.includes(id);
+      const card = document.createElement('div');
+      card.className = `recommend-card ${state.loadedVideoId === id ? 'active' : ''}`;
+      card.setAttribute('role', 'button');
+      card.tabIndex = 0;
+      card.setAttribute('aria-label', `Play ${track.title}`);
+
+      const image = document.createElement('img');
+      image.className = 'recommend-thumb';
+      image.alt = '';
+      image.loading = 'lazy';
+      image.src = thumbnail(id);
+
+      const copy = document.createElement('span');
+      copy.className = 'recommend-copy';
+      const title = document.createElement('strong');
+      title.className = 'recommend-title';
+      title.textContent = track.title;
+      const author = document.createElement('span');
+      author.className = 'recommend-artist';
+      author.textContent = track.author;
+      copy.append(title, author);
+
+      const actions = createMoreMenu([
+        { label: 'Queue', onClick: () => queueTrack(item) },
+        { label: added ? 'Added' : 'Add', kind: 'ok', onClick: () => { if (!added) addTrack(item); } },
+      ]);
+
+      card.append(image, copy, actions);
+      card.addEventListener('click', () => playRecommended(item));
+      card.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' '){
+          event.preventDefault();
+          playRecommended(item);
+        }
+      });
+      fragment.append(card);
+    });
+    els.recommendGrid.append(fragment);
+    hydrateRecommendationMetadata(ids);
+  }
+
   function closeMenus(except = null){
     document.querySelectorAll('.item-actions.open').forEach(menu => {
       if (menu !== except) menu.classList.remove('open');
@@ -1877,6 +2122,7 @@
 
   function repaint(){
     renderShell();
+    renderRecommendations();
     renderTracks();
   }
 
@@ -2091,6 +2337,7 @@
     await Promise.allSettled(workers);
     if (token === state.loadToken){
       updateNowPlaying();
+      renderRecommendations();
       renderTracks();
     }
   }
@@ -2123,6 +2370,7 @@
 
     if (token === state.loadToken){
       updateNowPlaying();
+      renderRecommendations();
       renderTracks();
     }
   }
