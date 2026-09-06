@@ -470,15 +470,47 @@
     padding-right:6px;
   }
   .item-actions{
+    position:relative;
     display:flex;
     align-items:center;
     gap:6px;
     justify-content:flex-end;
   }
+  .more-btn{
+    width:32px;
+    height:32px;
+    border:1px solid var(--line);
+    border-radius:50%;
+    background:rgba(255,255,255,.06);
+    color:var(--text);
+    display:grid;
+    place-items:center;
+    cursor:pointer;
+    font-size:16px;
+    font-weight:900;
+    line-height:1;
+  }
+  .more-btn:hover{background:rgba(255,255,255,.12)}
+  .action-menu{
+    position:absolute;
+    right:0;
+    top:calc(100% + 6px);
+    z-index:50;
+    display:none;
+    flex-direction:column;
+    gap:4px;
+    min-width:128px;
+    padding:6px;
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    background:#1a1a1a;
+    box-shadow:0 16px 34px rgba(0,0,0,.45);
+  }
+  .item-actions.open .action-menu{display:flex}
   .mini-action{
     min-height:30px;
     border:1px solid var(--line);
-    border-radius:999px;
+    border-radius:6px;
     background:rgba(255,255,255,.06);
     color:var(--text);
     padding:0 9px;
@@ -486,6 +518,9 @@
     font-weight:850;
     cursor:pointer;
     white-space:nowrap;
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
   }
   .mini-action:hover{background:rgba(255,255,255,.12)}
   .mini-action.ok{color:var(--ok)}
@@ -824,11 +859,10 @@
       gap:8px;
       padding:7px;
     }
-    .track-row.custom{grid-template-columns:24px 56px minmax(0, 1fr) 28px}
-    .track-row.custom{grid-template-columns:24px 56px minmax(0, 1fr)}
+    .track-row.custom{grid-template-columns:24px 56px minmax(0, 1fr) 32px}
     .track-row .item-actions{
-      grid-column:2 / -1;
-      justify-content:flex-start;
+      grid-column:auto;
+      justify-content:flex-end;
     }
     .mini-action{
       min-height:28px;
@@ -1275,6 +1309,49 @@
     els.trackList.replaceChildren(empty);
   }
 
+  function closeMenus(except = null){
+    document.querySelectorAll('.item-actions.open').forEach(menu => {
+      if (menu !== except) menu.classList.remove('open');
+    });
+  }
+
+  function createMoreMenu(items){
+    const wrap = document.createElement('span');
+    wrap.className = 'item-actions';
+
+    const trigger = document.createElement('span');
+    trigger.className = 'more-btn';
+    trigger.setAttribute('role', 'button');
+    trigger.setAttribute('aria-label', 'More options');
+    trigger.textContent = '...';
+    trigger.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const isOpen = wrap.classList.contains('open');
+      closeMenus(wrap);
+      wrap.classList.toggle('open', !isOpen);
+    });
+
+    const menu = document.createElement('span');
+    menu.className = 'action-menu';
+    items.forEach(item => {
+      const action = document.createElement('span');
+      action.className = `mini-action ${item.kind || ''}`.trim();
+      action.setAttribute('role', 'button');
+      action.textContent = item.label;
+      action.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeMenus();
+        item.onClick();
+      });
+      menu.append(action);
+    });
+
+    wrap.append(trigger, menu);
+    return wrap;
+  }
+
   function renderTracks(){
     if (state.isLoading){
       renderLoadingRows();
@@ -1337,41 +1414,11 @@
 
       row.append(indexCell, image, main);
       if (custom){
-        const actions = document.createElement('span');
-        actions.className = 'item-actions';
-
-        const queue = document.createElement('span');
-        queue.className = 'mini-action';
-        queue.setAttribute('role', 'button');
-        queue.textContent = 'Queue';
-        queue.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          queueTrack({ id, title: track.title, author: track.author });
-        });
-
-        const move = document.createElement('span');
-        move.className = 'mini-action';
-        move.setAttribute('role', 'button');
-        move.textContent = 'Move';
-        move.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          moveTrackToPlaylist(index);
-        });
-
-        const remove = document.createElement('span');
-        remove.className = 'mini-action danger';
-        remove.setAttribute('role', 'button');
-        remove.setAttribute('aria-label', `Remove ${track.title}`);
-        remove.textContent = 'Remove';
-        remove.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          removeTrack(index);
-        });
-
-        actions.append(queue, move, remove);
+        const actions = createMoreMenu([
+          { label: 'Queue', onClick: () => queueTrack({ id, title: track.title, author: track.author }) },
+          { label: 'Move', onClick: () => moveTrackToPlaylist(index) },
+          { label: 'Remove', kind: 'danger', onClick: () => removeTrack(index) },
+        ]);
         row.append(actions);
       }
       row.addEventListener('click', () => playTrack(index));
@@ -2121,28 +2168,10 @@
       author.textContent = item.author;
       copy.append(title, author);
 
-      const actions = document.createElement('span');
-      actions.className = 'item-actions';
-
-      const add = document.createElement('em');
-      add.className = 'mini-action ok';
-      add.textContent = added ? 'Added' : 'Add';
-      add.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!added) addTrack(item);
-      });
-
-      const queue = document.createElement('em');
-      queue.className = 'mini-action';
-      queue.textContent = 'Queue';
-      queue.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        queueTrack(item);
-      });
-
-      actions.append(add, queue);
+      const actions = createMoreMenu([
+        { label: added ? 'Added' : 'Add', kind: 'ok', onClick: () => { if (!added) addTrack(item); } },
+        { label: 'Queue', onClick: () => queueTrack(item) },
+      ]);
       row.append(image, copy, actions);
       row.addEventListener('click', () => {
         if (added) queueTrack(item);
@@ -2324,6 +2353,7 @@
     window.clearTimeout(state.searchTimer);
     runYoutubeSearch(els.searchInput.value);
   });
+  document.addEventListener('click', () => closeMenus());
   els.seekBar.addEventListener('input', () => {
     state.isSeeking = true;
     let duration = 0;
