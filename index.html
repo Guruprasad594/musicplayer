@@ -95,7 +95,7 @@
   }
 
   .tabs-wrap{
-    display:none;
+    display:flex;
     align-items:center;
     gap:8px;
     min-width:0;
@@ -1006,18 +1006,25 @@
   };
 
   function loadSavedPlaylists(){
-    const savedTracks = [];
+    const savedMainTracks = [];
+    const custom = [];
     try {
       const parsed = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]');
       if (Array.isArray(parsed)){
         parsed.forEach(item => {
-          if (item && Array.isArray(item.tracks)) savedTracks.push(...item.tracks);
+          if (!item || !item.custom) return;
+          if (item.id === 'main-songs'){
+            if (Array.isArray(item.tracks)) savedMainTracks.push(...item.tracks);
+            return;
+          }
+          if (typeof item.name === 'string') custom.push(item);
         });
       }
     } catch {
-      savedTracks.length = 0;
+      savedMainTracks.length = 0;
+      custom.length = 0;
     }
-    playlists = [mainPlaylist(savedTracks)];
+    playlists = [mainPlaylist(savedMainTracks)].concat(custom);
   }
 
   function saveCustomPlaylists(){
@@ -1174,7 +1181,7 @@
     els.prevBtn.disabled = !state.playerReady || !state.videoIds.length;
     els.playBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.isLoading);
     els.nextBtn.disabled = !state.playerReady || !state.videoIds.length;
-    if (els.deletePlaylistBtn) els.deletePlaylistBtn.hidden = true;
+    if (els.deletePlaylistBtn) els.deletePlaylistBtn.hidden = !playlist.custom || playlist.id === 'main-songs';
     renderTabs();
     updateNowPlaying();
   }
@@ -1212,7 +1219,7 @@
 
     const fragment = document.createDocumentFragment();
     rows.forEach(({ id, index, track }) => {
-      const isActive = index === state.activeIndex;
+      const isActive = state.loadedVideoId ? id === state.loadedVideoId : index === state.activeIndex;
       const custom = !!currentPlaylist().custom;
       const row = document.createElement('button');
       row.type = 'button';
@@ -1293,7 +1300,7 @@
   }
 
   function updateNowPlaying(){
-    const id = state.videoIds[state.activeIndex] || state.videoIds[0];
+    const id = state.loadedVideoId || state.videoIds[state.activeIndex] || state.videoIds[0];
     const track = id ? getTrack(id, Math.max(state.activeIndex, 0)) : null;
     els.nowLabel.textContent = state.isPlaying ? 'Now playing' : 'Now selected';
     els.nowTitle.textContent = track ? track.title : state.isLoading ? 'Loading playlist' : 'Pick a track';
@@ -1377,10 +1384,17 @@
     state.playerReady = false;
   }
 
-  function createPlayerForPlaylist(token){
+  function createPlayerForPlaylist(token, keepPlayback = false){
     if (!state.apiReady || !window.YT || !window.YT.Player){
       setStatus('Connecting');
       showPlayerMessage('Connecting to YouTube');
+      return;
+    }
+
+    const tracks = seededTrackIds();
+    const listId = currentPlaylistId();
+    if (state.playerReady && state.player && (tracks.length || keepPlayback || !isYoutubeListId(listId))){
+      finishPlaylistLoad(tracks, token, keepPlayback);
       return;
     }
 
@@ -1402,10 +1416,8 @@
           state.playerReady = true;
           enableBackgroundPlayback();
           try {
-            const tracks = seededTrackIds();
-            const listId = currentPlaylistId();
             if (tracks.length){
-              finishPlaylistLoad(tracks, token);
+              finishPlaylistLoad(tracks, token, keepPlayback);
               return;
             }
             if (isYoutubeListId(listId)){
@@ -1430,13 +1442,16 @@
       state.pollTimer = 0;
     }
 
+    const keepPlayback = state.isPlaying || state.shouldPlay || !!state.loadedVideoId;
     state.playlistIndex = index;
     state.videoIds = [];
     state.activeIndex = -1;
-    state.isPlaying = false;
-    state.shouldPlay = false;
+    if (!keepPlayback){
+      state.isPlaying = false;
+      state.shouldPlay = false;
+      state.loadedVideoId = '';
+    }
     state.isLoading = true;
-    state.loadedVideoId = '';
     state.loadToken += 1;
     if (!options.keepSearch){
       state.searchItems = [];
@@ -1455,7 +1470,7 @@
       setStatus('Connecting');
       return;
     }
-    createPlayerForPlaylist(token);
+    createPlayerForPlaylist(token, keepPlayback);
   }
 
   function waitForPlaylist(token){
@@ -1504,14 +1519,19 @@
     }, 250);
   }
 
-  function finishPlaylistLoad(ids, token){
+  function finishPlaylistLoad(ids, token, keepPlayback = false){
     clearInterval(state.pollTimer);
     state.pollTimer = 0;
+    const playingId = keepPlayback ? state.loadedVideoId : '';
     state.videoIds = ids;
-    state.activeIndex = ids.length ? 0 : -1;
+    state.activeIndex = playingId ? ids.indexOf(playingId) : 0;
+    if (state.activeIndex < 0) state.activeIndex = ids.length ? 0 : -1;
     state.isLoading = false;
-    state.isPlaying = false;
-    state.loadedVideoId = '';
+    if (!keepPlayback){
+      state.isPlaying = false;
+      state.shouldPlay = false;
+      state.loadedVideoId = '';
+    }
     const playlist = currentPlaylist();
     if (playlist.custom && (!playlist.tracks || !playlist.tracks.length) && ids.length){
       playlist.tracks = ids.slice();
