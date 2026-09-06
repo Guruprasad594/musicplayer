@@ -402,6 +402,13 @@
     gap:12px;
     padding:0 4px;
   }
+  .home-actions{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
   .home-title{
     margin:0;
     font-size:clamp(30px, 6vh, 54px);
@@ -721,6 +728,41 @@
     border-color:transparent;
     color:var(--accent-ink);
   }
+  .language-grid{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:8px;
+    margin:8px 0 12px;
+  }
+  .language-chip{
+    position:relative;
+    min-width:0;
+    cursor:pointer;
+  }
+  .language-chip input{
+    position:absolute;
+    opacity:0;
+    pointer-events:none;
+  }
+  .language-chip span{
+    min-height:40px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:rgba(255,255,255,.05);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 12px;
+    color:var(--muted);
+    font-size:13px;
+    font-weight:850;
+    text-align:center;
+  }
+  .language-chip input:checked + span{
+    border-color:transparent;
+    background:var(--accent);
+    color:var(--accent-ink);
+  }
 
   .track-row.custom{
     grid-template-columns:34px 76px minmax(0, 1fr) auto;
@@ -943,6 +985,8 @@
       padding:10px 0 14px;
     }
     .home-title{font-size:34px}
+    .home-head{align-items:flex-start}
+    .home-actions .text-btn{min-height:30px}
     .recommend-grid{
       grid-template-columns:repeat(2, minmax(0, 1fr));
       gap:8px;
@@ -1025,6 +1069,7 @@
     .track-badge{display:none}
     .queue-head{align-items:flex-start}
     .queue-title{font-size:20px}
+    .language-grid{grid-template-columns:1fr}
   }
 </style>
 </head>
@@ -1116,6 +1161,9 @@
           <span class="eyebrow">Home</span>
           <h1 class="home-title">Recommended</h1>
         </div>
+        <div class="home-actions">
+          <button class="text-btn" id="language-btn" type="button">Languages</button>
+        </div>
       </div>
       <div class="recommend-grid" id="recommend-grid"></div>
     </section>
@@ -1166,6 +1214,18 @@
   </form>
 </dialog>
 
+<dialog class="sheet" id="language-dialog" aria-labelledby="language-dialog-title">
+  <form class="sheet-form" id="language-form">
+    <h2 id="language-dialog-title">Choose languages</h2>
+    <div class="language-grid" id="language-options"></div>
+    <p class="sheet-hint" id="language-message">Select one or more languages.</p>
+    <div class="sheet-actions">
+      <button id="language-cancel" type="button">Cancel</button>
+      <button class="primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore-compat.js"></script>
@@ -1199,15 +1259,14 @@
   };
   const CLOUD_COLLECTION = 'sur-users';
   const RECOMMEND_LIMIT = 30;
-  const RECOMMEND_QUERIES = [
-    'latest Kannada songs official music video',
-    'new Kannada songs official lyrical video',
-    'latest Hindi songs official music video',
-    'new Bollywood songs official music video',
-    'latest Indian songs official video',
-    'new Tamil songs official music video',
-    'new Telugu songs official music video',
-    'latest Malayalam songs official music video',
+  const LANGUAGE_OPTIONS = [
+    { id: 'kannada', name: 'Kannada', queries: ['latest Kannada songs official music video', 'new Kannada songs official lyrical video', 'Kannada new movie songs official'] },
+    { id: 'hindi', name: 'Hindi', queries: ['latest Hindi songs official music video', 'new Bollywood songs official music video', 'Hindi new movie songs official'] },
+    { id: 'tamil', name: 'Tamil', queries: ['latest Tamil songs official music video', 'new Tamil songs official lyrical video', 'Tamil new movie songs official'] },
+    { id: 'telugu', name: 'Telugu', queries: ['latest Telugu songs official music video', 'new Telugu songs official lyrical video', 'Telugu new movie songs official'] },
+    { id: 'malayalam', name: 'Malayalam', queries: ['latest Malayalam songs official music video', 'new Malayalam songs official lyrical video', 'Malayalam new movie songs official'] },
+    { id: 'punjabi', name: 'Punjabi', queries: ['latest Punjabi songs official music video', 'new Punjabi songs official video', 'Punjabi latest songs official'] },
+    { id: 'english', name: 'English', queries: ['latest English songs official music video', 'new pop songs official music video', 'new English music official video'] },
   ];
   const PLAYLIST_COLORS = ['#ff7448', '#f3c04d', '#47d18c', '#6ea8ff', '#d28cff', '#ff8eb0'];
   function mainPlaylist(extraTracks = [], includeBuiltins = true){
@@ -1238,6 +1297,7 @@
     isPlaying: false,
     shouldPlay: false,
     isLoading: true,
+    accountLoading: false,
     loadToken: 0,
     pollTimer: 0,
     progressTimer: 0,
@@ -1255,6 +1315,8 @@
     recommendError: '',
     recommendToken: 0,
     recommendHydrating: false,
+    languages: [],
+    languageRequired: false,
     pendingAdd: null,
     ytRequested: false,
   };
@@ -1297,6 +1359,12 @@
     iosHint: document.getElementById('ios-hint'),
     trackList: document.getElementById('track-list'),
     recommendGrid: document.getElementById('recommend-grid'),
+    languageBtn: document.getElementById('language-btn'),
+    languageDialog: document.getElementById('language-dialog'),
+    languageForm: document.getElementById('language-form'),
+    languageOptions: document.getElementById('language-options'),
+    languageMessage: document.getElementById('language-message'),
+    languageCancel: document.getElementById('language-cancel'),
     newPlaylistBtn: document.getElementById('new-playlist-btn'),
     deletePlaylistBtn: document.getElementById('delete-playlist-btn'),
     accountStatus: document.getElementById('account-status'),
@@ -1329,6 +1397,36 @@
     return cloud.user ? `${CUSTOM_KEY}:${cloud.user.uid}` : `${CUSTOM_KEY}:signed-out`;
   }
 
+  function validLanguages(value){
+    const allowed = new Set(LANGUAGE_OPTIONS.map(item => item.id));
+    const source = Array.isArray(value) ? value : [];
+    return Array.from(new Set(source.filter(id => allowed.has(id))));
+  }
+
+  function languageNames(ids = state.languages){
+    const names = new Map(LANGUAGE_OPTIONS.map(item => [item.id, item.name]));
+    return validLanguages(ids).map(id => names.get(id)).filter(Boolean);
+  }
+
+  function updateLanguageButton(){
+    if (!els.languageBtn) return;
+    const names = languageNames();
+    els.languageBtn.textContent = names.length
+      ? names.length === 1 ? names[0] : `${names.length} languages`
+      : 'Languages';
+  }
+
+  function emptyPlaylistPayload(){
+    return [{
+      custom: true,
+      id: 'main-songs',
+      name: 'Songs',
+      color: '#f3c04d',
+      list: '',
+      tracks: [],
+    }];
+  }
+
   function updateAccountUi(){
     if (!firebaseConfigured()){
       els.accountStatus.textContent = 'Firebase off';
@@ -1345,6 +1443,7 @@
       els.accountBtn.hidden = true;
       els.logoutBtn.hidden = true;
     }
+    updateLanguageButton();
   }
 
   function stopPlayback(){
@@ -1399,6 +1498,8 @@
     state.recommendError = '';
     state.recommendToken += 1;
     state.recommendHydrating = false;
+    state.languages = [];
+    state.languageRequired = false;
     state.pendingAdd = null;
     if (els.searchInput) els.searchInput.value = '';
     if (els.searchResults) els.searchResults.replaceChildren();
@@ -1465,15 +1566,18 @@
     try {
       const doc = await docRef.get();
       if (!cloud.user || cloud.user.uid !== uid) return;
+      const data = doc.exists ? (doc.data() || {}) : {};
+      state.languages = validLanguages(data.languages);
       if (doc.exists && Array.isArray((doc.data() || {}).playlists)){
-        localStorage.setItem(storageKey(), JSON.stringify(doc.data().playlists));
+        localStorage.setItem(storageKey(), JSON.stringify(data.playlists));
         loadSavedPlaylists();
       } else {
         playlists = [mainPlaylist([], false)];
         state.playlistIndex = 0;
-        localStorage.setItem(storageKey(), JSON.stringify(playlistPayload()));
+        localStorage.setItem(storageKey(), JSON.stringify(emptyPlaylistPayload()));
         await docRef.set({
-          playlists: playlistPayload(),
+          playlists: emptyPlaylistPayload(),
+          languages: state.languages,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
       }
@@ -1481,7 +1585,9 @@
       state.recommendItems = [];
       state.recommendLoaded = false;
       state.recommendError = '';
-      loadFreshRecommendations(true);
+      updateLanguageButton();
+      if (state.languages.length) loadFreshRecommendations(true);
+      else window.setTimeout(() => openLanguageDialog(true), 80);
       setStatus('Synced', 'ok');
     } catch {
       if (!cloud.user || cloud.user.uid !== uid) return;
@@ -1489,6 +1595,7 @@
       setStatus('Cloud load failed', 'warn');
     } finally {
       if (cloud.user && cloud.user.uid === uid){
+        state.accountLoading = false;
         cloud.syncing = false;
         updateAccountUi();
       }
@@ -1501,6 +1608,68 @@
 
   function closeAccountDialog(){
     if (cloud.user) unlockApp();
+  }
+
+  function renderLanguageOptions(){
+    if (!els.languageOptions) return;
+    els.languageOptions.replaceChildren();
+    LANGUAGE_OPTIONS.forEach(option => {
+      const label = document.createElement('label');
+      label.className = 'language-chip';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = option.id;
+      input.checked = state.languages.includes(option.id);
+      const text = document.createElement('span');
+      text.textContent = option.name;
+      label.append(input, text);
+      els.languageOptions.append(label);
+    });
+    els.languageCancel.hidden = state.languageRequired;
+    els.languageMessage.textContent = 'Select one or more languages.';
+  }
+
+  function openLanguageDialog(required = false){
+    if (!els.languageDialog) return;
+    state.languageRequired = required;
+    renderLanguageOptions();
+    if (typeof els.languageDialog.showModal === 'function'){
+      if (!els.languageDialog.open) els.languageDialog.showModal();
+    } else {
+      els.languageDialog.setAttribute('open', '');
+    }
+  }
+
+  function closeLanguageDialog(){
+    if (!els.languageDialog || state.languageRequired) return;
+    if (typeof els.languageDialog.close === 'function' && els.languageDialog.open) els.languageDialog.close();
+    else els.languageDialog.removeAttribute('open');
+  }
+
+  async function saveLanguages(){
+    const checked = [...els.languageOptions.querySelectorAll('input:checked')].map(input => input.value);
+    const selected = validLanguages(checked);
+    if (!selected.length){
+      els.languageMessage.textContent = 'Pick at least one language.';
+      return;
+    }
+    state.languages = selected;
+    state.languageRequired = false;
+    state.recommendItems = [];
+    state.recommendLoaded = false;
+    state.recommendError = '';
+    state.recommendToken += 1;
+    updateLanguageButton();
+    if (cloud.ready && cloud.user){
+      await cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).set({
+        languages: selected,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => setStatus('Language save failed', 'warn'));
+    }
+    if (typeof els.languageDialog.close === 'function' && els.languageDialog.open) els.languageDialog.close();
+    else els.languageDialog.removeAttribute('open');
+    loadFreshRecommendations(true);
+    renderRecommendations();
   }
 
   function setAuthMode(mode){
@@ -1546,7 +1715,8 @@
         await cloud.db.collection(CLOUD_COLLECTION).doc(credential.user.uid).set({
           name,
           email,
-          playlists: playlistPayload(),
+          playlists: emptyPlaylistPayload(),
+          languages: [],
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
@@ -1576,6 +1746,7 @@
       cloud.auth.onAuthStateChanged(async user => {
         const previousUid = cloud.user ? cloud.user.uid : '';
         const nextUid = user ? user.uid : '';
+        state.accountLoading = !!user && previousUid !== nextUid;
         cloud.user = user;
         if (previousUid !== nextUid) resetAccountState();
         updateAccountUi();
@@ -1584,6 +1755,7 @@
           await loadCloudPlaylists();
           ensureYoutubeApi();
         } else {
+          state.accountLoading = false;
           lockApp();
         }
       });
@@ -1812,6 +1984,7 @@
     els.playBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.playQueue.length && !state.isLoading);
     els.nextBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.playQueue.length);
     if (els.deletePlaylistBtn) els.deletePlaylistBtn.hidden = !playlist.custom || playlist.id === 'main-songs';
+    updateLanguageButton();
     renderTabs();
     updateNowPlaying();
   }
@@ -1880,9 +2053,27 @@
     }
   }
 
+  function selectedRecommendationQueries(){
+    const options = new Map(LANGUAGE_OPTIONS.map(item => [item.id, item]));
+    return validLanguages(state.languages).flatMap(id => {
+      const option = options.get(id);
+      return option ? option.queries : [];
+    });
+  }
+
   async function loadFreshRecommendations(force = false){
     if (!cloud.user || (state.recommendLoading && !force)) return;
     if (!force && state.recommendLoaded) return;
+    const queryPool = selectedRecommendationQueries();
+    if (!queryPool.length){
+      state.recommendItems = [];
+      state.recommendLoaded = true;
+      state.recommendLoading = false;
+      state.recommendError = 'Choose languages to get latest songs.';
+      renderRecommendations();
+      window.setTimeout(() => openLanguageDialog(true), 50);
+      return;
+    }
     const uid = cloud.user.uid;
     const token = state.recommendToken + 1;
     state.recommendToken = token;
@@ -1893,7 +2084,7 @@
     const banned = playlistIdSet();
     const seen = new Set(banned);
     const found = [];
-    const queries = shuffle(RECOMMEND_QUERIES).slice(0, 5);
+    const queries = shuffle(queryPool).slice(0, 6);
 
     try {
       const batches = await Promise.allSettled(queries.map(searchLatestSongs));
@@ -1931,6 +2122,15 @@
     if (!els.recommendGrid) return;
     if (!cloud.user){
       els.recommendGrid.replaceChildren();
+      return;
+    }
+    if (state.accountLoading){
+      renderRecommendationMessage('Loading account...');
+      return;
+    }
+    if (!state.languages.length){
+      renderRecommendationMessage('Choose languages to get latest songs.');
+      window.setTimeout(() => openLanguageDialog(true), 50);
       return;
     }
     if (!state.recommendLoaded && !state.recommendLoading){
@@ -3014,6 +3214,15 @@
   els.newPlaylistBtn.addEventListener('click', openPlaylistDialog);
   els.deletePlaylistBtn.addEventListener('click', deleteCurrentPlaylist);
   els.accountBtn.addEventListener('click', openAccountDialog);
+  els.languageBtn.addEventListener('click', () => openLanguageDialog(false));
+  els.languageCancel.addEventListener('click', event => {
+    event.preventDefault();
+    closeLanguageDialog();
+  });
+  els.languageForm.addEventListener('submit', event => {
+    event.preventDefault();
+    saveLanguages();
+  });
   els.logoutBtn.addEventListener('click', () => {
     if (cloud.auth) cloud.auth.signOut();
   });
