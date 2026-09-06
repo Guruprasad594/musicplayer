@@ -469,6 +469,27 @@
     color:var(--ok);
     padding-right:6px;
   }
+  .item-actions{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    justify-content:flex-end;
+  }
+  .mini-action{
+    min-height:30px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:rgba(255,255,255,.06);
+    color:var(--text);
+    padding:0 9px;
+    font-size:11px;
+    font-weight:850;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .mini-action:hover{background:rgba(255,255,255,.12)}
+  .mini-action.ok{color:var(--ok)}
+  .mini-action.danger{color:#ffb4a4}
 
   .sheet{
     border:1px solid var(--line);
@@ -538,7 +559,7 @@
   }
 
   .track-row.custom{
-    grid-template-columns:34px 76px minmax(0, 1fr) 34px;
+    grid-template-columns:34px 76px minmax(0, 1fr) auto;
   }
   .remove-track{
     width:32px;
@@ -804,6 +825,16 @@
       padding:7px;
     }
     .track-row.custom{grid-template-columns:24px 56px minmax(0, 1fr) 28px}
+    .track-row.custom{grid-template-columns:24px 56px minmax(0, 1fr)}
+    .track-row .item-actions{
+      grid-column:2 / -1;
+      justify-content:flex-start;
+    }
+    .mini-action{
+      min-height:28px;
+      padding:0 8px;
+      font-size:10px;
+    }
     .track-thumb{width:56px}
     .track-title{font-size:13px}
     .track-artist{font-size:11px}
@@ -926,10 +957,10 @@
 
   const CUSTOM_KEY = 'sur-custom-playlists-v1';
   const PLAYLIST_COLORS = ['#ff7448', '#f3c04d', '#47d18c', '#6ea8ff', '#d28cff', '#ff8eb0'];
-  function mainPlaylist(extraTracks = []){
+  function mainPlaylist(extraTracks = [], includeBuiltins = true){
     const tracks = Array.from(new Set([
-      'KQ5oWUygSK0',
-      ...BUILTIN_PLAYLISTS.flatMap(playlist => Array.isArray(playlist.tracks) ? playlist.tracks : []),
+      ...(includeBuiltins ? ['KQ5oWUygSK0'] : []),
+      ...(includeBuiltins ? BUILTIN_PLAYLISTS.flatMap(playlist => Array.isArray(playlist.tracks) ? playlist.tracks : []) : []),
       ...extraTracks,
     ]));
     return {
@@ -957,6 +988,7 @@
     loadToken: 0,
     pollTimer: 0,
     progressTimer: 0,
+    playQueue: [],
     loadedVideoId: '',
     isSeeking: false,
     statusKind: '',
@@ -1006,7 +1038,7 @@
   };
 
   function loadSavedPlaylists(){
-    const savedMainTracks = [];
+    let savedMainTracks = null;
     const custom = [];
     try {
       const parsed = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]');
@@ -1014,17 +1046,17 @@
         parsed.forEach(item => {
           if (!item || !item.custom) return;
           if (item.id === 'main-songs'){
-            if (Array.isArray(item.tracks)) savedMainTracks.push(...item.tracks);
+            if (Array.isArray(item.tracks)) savedMainTracks = item.tracks.slice();
             return;
           }
           if (typeof item.name === 'string') custom.push(item);
         });
       }
     } catch {
-      savedMainTracks.length = 0;
+      savedMainTracks = null;
       custom.length = 0;
     }
-    playlists = [mainPlaylist(savedMainTracks)].concat(custom);
+    playlists = [mainPlaylist(savedMainTracks || [], savedMainTracks === null)].concat(custom);
   }
 
   function saveCustomPlaylists(){
@@ -1130,6 +1162,44 @@
     return state.tracks.get(id) || fallbackTrack(id, index);
   }
 
+  function rememberTrack(item){
+    if (!item || !item.id || state.tracks.has(item.id)) return;
+    state.tracks.set(item.id, {
+      id: item.id,
+      title: item.title || 'YouTube video',
+      author: item.author || 'YouTube',
+      ready: true,
+      unavailable: false,
+    });
+  }
+
+  function playlistTargets(){
+    const current = currentPlaylist();
+    return playlists.filter(playlist => playlist.custom && playlist.id !== current.id);
+  }
+
+  function chooseTargetPlaylist(){
+    const targets = playlistTargets();
+    if (!targets.length){
+      setStatus('Create another playlist first', 'warn');
+      return null;
+    }
+    const choice = window.prompt(`Move to playlist:\n${targets.map((playlist, index) => `${index + 1}. ${playlist.name}`).join('\n')}`);
+    if (!choice) return null;
+    const number = Number.parseInt(choice, 10);
+    if (Number.isInteger(number) && targets[number - 1]) return targets[number - 1];
+    return targets.find(playlist => playlist.name.toLowerCase() === choice.trim().toLowerCase()) || null;
+  }
+
+  function addIdToPlaylist(playlist, id){
+    if (!playlist || !id) return false;
+    if (!Array.isArray(playlist.tracks)) playlist.tracks = [];
+    if (playlist.tracks.includes(id)) return false;
+    playlist.tracks.push(id);
+    saveCustomPlaylists();
+    return true;
+  }
+
   function setAccent(color){
     document.documentElement.style.setProperty('--accent', color);
   }
@@ -1177,10 +1247,11 @@
     const playlist = currentPlaylist();
     setAccent(playlist.color);
     els.playlistTitle.textContent = playlist.name;
-    els.trackCount.textContent = `${state.videoIds.length} ${state.videoIds.length === 1 ? 'track' : 'tracks'}`;
+    const queueText = state.playQueue.length ? ` · ${state.playQueue.length} queued` : '';
+    els.trackCount.textContent = `${state.videoIds.length} ${state.videoIds.length === 1 ? 'track' : 'tracks'}${queueText}`;
     els.prevBtn.disabled = !state.playerReady || !state.videoIds.length;
-    els.playBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.isLoading);
-    els.nextBtn.disabled = !state.playerReady || !state.videoIds.length;
+    els.playBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.playQueue.length && !state.isLoading);
+    els.nextBtn.disabled = !state.playerReady || (!state.videoIds.length && !state.playQueue.length);
     if (els.deletePlaylistBtn) els.deletePlaylistBtn.hidden = !playlist.custom || playlist.id === 'main-songs';
     renderTabs();
     updateNowPlaying();
@@ -1264,23 +1335,44 @@
 
       main.append(title, author);
 
-      const badge = document.createElement('span');
-      badge.className = 'track-badge';
-      badge.textContent = track.unavailable ? 'Unavailable' : isActive ? 'Active' : currentPlaylist().name;
-
-      row.append(indexCell, image, main, badge);
+      row.append(indexCell, image, main);
       if (custom){
+        const actions = document.createElement('span');
+        actions.className = 'item-actions';
+
+        const queue = document.createElement('span');
+        queue.className = 'mini-action';
+        queue.setAttribute('role', 'button');
+        queue.textContent = 'Queue';
+        queue.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          queueTrack({ id, title: track.title, author: track.author });
+        });
+
+        const move = document.createElement('span');
+        move.className = 'mini-action';
+        move.setAttribute('role', 'button');
+        move.textContent = 'Move';
+        move.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          moveTrackToPlaylist(index);
+        });
+
         const remove = document.createElement('span');
-        remove.className = 'remove-track';
+        remove.className = 'mini-action danger';
         remove.setAttribute('role', 'button');
         remove.setAttribute('aria-label', `Remove ${track.title}`);
-        remove.textContent = '×';
+        remove.textContent = 'Remove';
         remove.addEventListener('click', event => {
           event.preventDefault();
           event.stopPropagation();
           removeTrack(index);
         });
-        row.append(remove);
+
+        actions.append(queue, move, remove);
+        row.append(actions);
       }
       row.addEventListener('click', () => playTrack(index));
       fragment.append(row);
@@ -1694,10 +1786,9 @@
     state.progressTimer = 0;
   }
 
-  function playTrack(index){
-    if (!state.playerReady || !state.videoIds[index]) return;
+  function playVideoId(id, index = state.videoIds.indexOf(id)){
+    if (!state.playerReady || !id) return;
 
-    const id = state.videoIds[index];
     state.activeIndex = index;
     state.isPlaying = true;
     state.shouldPlay = true;
@@ -1726,9 +1817,25 @@
     }
   }
 
+  function playTrack(index){
+    if (!state.videoIds[index]) return;
+    playVideoId(state.videoIds[index], index);
+  }
+
+  function queueTrack(item){
+    if (!item || !item.id) return;
+    rememberTrack(item);
+    state.playQueue.push(item.id);
+    setStatus(`${state.playQueue.length} in queue`, 'ok');
+    if (!state.isPlaying && !state.loadedVideoId && state.playerReady){
+      nextTrack();
+      return;
+    }
+    repaint();
+  }
+
   function togglePlay(){
     if (!state.playerReady || !state.player) return;
-    if (!state.videoIds.length) return;
 
     if (state.isPlaying){
       state.shouldPlay = false;
@@ -1738,6 +1845,18 @@
 
     state.shouldPlay = true;
     claimPlaybackSession();
+
+    if (!state.videoIds.length){
+      if (state.loadedVideoId){
+        state.player.playVideo && state.player.playVideo();
+        state.isPlaying = true;
+        startProgressTimer();
+        repaint();
+      } else if (state.playQueue.length){
+        nextTrack();
+      }
+      return;
+    }
 
     if (state.activeIndex < 0){
       playTrack(0);
@@ -1761,6 +1880,11 @@
   }
 
   function nextTrack(){
+    if (state.playQueue.length){
+      playVideoId(state.playQueue.shift());
+      setStatus(state.playQueue.length ? `${state.playQueue.length} in queue` : 'Playing queued song', 'ok');
+      return;
+    }
     if (!state.videoIds.length) return;
     const next = state.activeIndex < 0 ? 0 : (state.activeIndex + 1) % state.videoIds.length;
     playTrack(next);
@@ -1981,10 +2105,10 @@
     const fragment = document.createDocumentFragment();
     items.forEach(item => {
       const added = state.videoIds.includes(item.id);
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'search-row';
-      row.disabled = added;
+      const row = document.createElement('div');
+      row.className = `search-row ${added ? 'added' : ''}`;
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
 
       const image = document.createElement('img');
       image.alt = '';
@@ -1997,10 +2121,33 @@
       author.textContent = item.author;
       copy.append(title, author);
 
-      const mark = document.createElement('em');
-      mark.textContent = added ? 'Added' : 'Add';
-      row.append(image, copy, mark);
-      row.addEventListener('click', () => addTrack(item));
+      const actions = document.createElement('span');
+      actions.className = 'item-actions';
+
+      const add = document.createElement('em');
+      add.className = 'mini-action ok';
+      add.textContent = added ? 'Added' : 'Add';
+      add.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!added) addTrack(item);
+      });
+
+      const queue = document.createElement('em');
+      queue.className = 'mini-action';
+      queue.textContent = 'Queue';
+      queue.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        queueTrack(item);
+      });
+
+      actions.append(add, queue);
+      row.append(image, copy, actions);
+      row.addEventListener('click', () => {
+        if (added) queueTrack(item);
+        else addTrack(item);
+      });
       fragment.append(row);
     });
     els.searchResults.append(fragment);
@@ -2016,15 +2163,7 @@
     if (!item || !item.id || state.videoIds.includes(item.id)) return;
 
     const startIndex = state.videoIds.length;
-    if (item.title){
-      state.tracks.set(item.id, {
-        id: item.id,
-        title: item.title,
-        author: item.author || 'YouTube',
-        ready: true,
-        unavailable: false,
-      });
-    }
+    rememberTrack(item);
     state.videoIds.push(item.id);
     persistCurrentTracks();
     setStatus(`${state.videoIds.length} tracks`, 'ok');
@@ -2032,7 +2171,22 @@
     repaint();
     renderSearchResults(state.searchItems);
     loadTrackMetadata(item.id, startIndex, state.loadToken);
-    if (state.playerReady) playTrack(startIndex);
+  }
+
+  function moveTrackToPlaylist(index){
+    const id = state.videoIds[index];
+    if (!id) return;
+    const target = chooseTargetPlaylist();
+    if (!target) return;
+
+    addIdToPlaylist(target, id);
+    state.videoIds.splice(index, 1);
+    persistCurrentTracks();
+    if (state.activeIndex > index) state.activeIndex -= 1;
+    if (state.loadedVideoId === id) state.activeIndex = -1;
+    setStatus(`Moved to ${target.name}`, 'ok');
+    repaint();
+    renderSearchResults(state.searchItems);
   }
 
   function removeTrack(index){
