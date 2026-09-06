@@ -1258,7 +1258,7 @@
     measurementId: 'G-6XQF8L3CZS',
   };
   const CLOUD_COLLECTION = 'sur-users';
-  const RECOMMEND_LIMIT = 30;
+  const RECOMMEND_LIMIT = 24;
   const LANGUAGE_OPTIONS = [
     { id: 'kannada', name: 'Kannada', queries: ['latest Kannada songs official music video', 'new Kannada songs official lyrical video', 'Kannada new movie songs official'] },
     { id: 'hindi', name: 'Hindi', queries: ['latest Hindi songs official music video', 'new Bollywood songs official music video', 'Hindi new movie songs official'] },
@@ -1314,6 +1314,7 @@
     recommendLoading: false,
     recommendError: '',
     recommendToken: 0,
+    recommendRenderedKey: '',
     recommendHydrating: false,
     languages: [],
     languageRequired: false,
@@ -1397,6 +1398,10 @@
     return cloud.user ? `${CUSTOM_KEY}:${cloud.user.uid}` : `${CUSTOM_KEY}:signed-out`;
   }
 
+  function languageStorageKey(){
+    return `${storageKey()}:languages`;
+  }
+
   function validLanguages(value){
     const allowed = new Set(LANGUAGE_OPTIONS.map(item => item.id));
     const source = Array.isArray(value) ? value : [];
@@ -1408,12 +1413,32 @@
     return validLanguages(ids).map(id => names.get(id)).filter(Boolean);
   }
 
+  function loadLocalLanguages(){
+    try {
+      return validLanguages(JSON.parse(localStorage.getItem(languageStorageKey()) || '[]'));
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLocalLanguages(languages){
+    try {
+      localStorage.setItem(languageStorageKey(), JSON.stringify(validLanguages(languages)));
+    } catch {
+      window.__surErrors.push('Could not save languages');
+    }
+  }
+
   function updateLanguageButton(){
     if (!els.languageBtn) return;
     const names = languageNames();
     els.languageBtn.textContent = names.length
       ? names.length === 1 ? names[0] : `${names.length} languages`
       : 'Languages';
+  }
+
+  function languageDialogOpen(){
+    return !!(els.languageDialog && (els.languageDialog.open || els.languageDialog.hasAttribute('open')));
   }
 
   function emptyPlaylistPayload(){
@@ -1497,6 +1522,7 @@
     state.recommendLoading = false;
     state.recommendError = '';
     state.recommendToken += 1;
+    state.recommendRenderedKey = '';
     state.recommendHydrating = false;
     state.languages = [];
     state.languageRequired = false;
@@ -1568,6 +1594,7 @@
       if (!cloud.user || cloud.user.uid !== uid) return;
       const data = doc.exists ? (doc.data() || {}) : {};
       state.languages = validLanguages(data.languages);
+      if (!state.languages.length) state.languages = loadLocalLanguages();
       if (doc.exists && Array.isArray((doc.data() || {}).playlists)){
         localStorage.setItem(storageKey(), JSON.stringify(data.playlists));
         loadSavedPlaylists();
@@ -1585,6 +1612,7 @@
       state.recommendItems = [];
       state.recommendLoaded = false;
       state.recommendError = '';
+      state.recommendRenderedKey = '';
       updateLanguageButton();
       if (state.languages.length) loadFreshRecommendations(true);
       else window.setTimeout(() => openLanguageDialog(true), 80);
@@ -1598,6 +1626,7 @@
         state.accountLoading = false;
         cloud.syncing = false;
         updateAccountUi();
+        renderRecommendations();
       }
     }
   }
@@ -1631,8 +1660,10 @@
 
   function openLanguageDialog(required = false){
     if (!els.languageDialog) return;
-    state.languageRequired = required;
-    renderLanguageOptions();
+    const alreadyOpen = languageDialogOpen();
+    state.languageRequired = required || state.languageRequired;
+    if (!alreadyOpen) renderLanguageOptions();
+    else els.languageCancel.hidden = state.languageRequired;
     if (typeof els.languageDialog.showModal === 'function'){
       if (!els.languageDialog.open) els.languageDialog.showModal();
     } else {
@@ -1659,17 +1690,18 @@
     state.recommendLoaded = false;
     state.recommendError = '';
     state.recommendToken += 1;
+    state.recommendRenderedKey = '';
+    saveLocalLanguages(selected);
     updateLanguageButton();
+    if (typeof els.languageDialog.close === 'function' && els.languageDialog.open) els.languageDialog.close();
+    else els.languageDialog.removeAttribute('open');
+    loadFreshRecommendations(true);
     if (cloud.ready && cloud.user){
-      await cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).set({
+      cloud.db.collection(CLOUD_COLLECTION).doc(cloud.user.uid).set({
         languages: selected,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       }, { merge: true }).catch(() => setStatus('Language save failed', 'warn'));
     }
-    if (typeof els.languageDialog.close === 'function' && els.languageDialog.open) els.languageDialog.close();
-    else els.languageDialog.removeAttribute('open');
-    loadFreshRecommendations(true);
-    renderRecommendations();
   }
 
   function setAuthMode(mode){
@@ -2026,6 +2058,9 @@
   }
 
   function renderRecommendationMessage(text){
+    const key = `message:${text}`;
+    if (state.recommendRenderedKey === key) return;
+    state.recommendRenderedKey = key;
     els.recommendGrid.replaceChildren();
     const empty = document.createElement('div');
     empty.className = 'empty';
@@ -2036,9 +2071,8 @@
   async function searchLatestSongs(query){
     const q = `${query} ${new Date().getFullYear()}`;
     const endpoints = [
-      { url: `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(q)}&type=video&sort_by=date`, kind: 'invidious' },
-      { url: `https://invidious.fdn.fr/api/v1/search?q=${encodeURIComponent(q)}&type=video&sort_by=date`, kind: 'invidious' },
       { url: `https://yt.lemnoslife.com/noKey/search?part=snippet&type=video&maxResults=12&order=date&q=${encodeURIComponent(q)}`, kind: 'youtube' },
+      { url: `https://inv.nadeko.net/api/v1/search?q=${encodeURIComponent(q)}&type=video&sort_by=date`, kind: 'invidious' },
     ];
     const tasks = endpoints.map(async endpoint => {
       const data = await fetchJson(endpoint.url);
@@ -2049,7 +2083,7 @@
     try {
       return await Promise.any(tasks);
     } catch {
-      return searchYouTube(q);
+      return [];
     }
   }
 
@@ -2057,7 +2091,7 @@
     const options = new Map(LANGUAGE_OPTIONS.map(item => [item.id, item]));
     return validLanguages(state.languages).flatMap(id => {
       const option = options.get(id);
-      return option ? option.queries : [];
+      return option ? shuffle(option.queries).slice(0, 2) : [];
     });
   }
 
@@ -2071,7 +2105,7 @@
       state.recommendLoading = false;
       state.recommendError = 'Choose languages to get latest songs.';
       renderRecommendations();
-      window.setTimeout(() => openLanguageDialog(true), 50);
+      if (!languageDialogOpen()) window.setTimeout(() => openLanguageDialog(true), 50);
       return;
     }
     const uid = cloud.user.uid;
@@ -2084,7 +2118,7 @@
     const banned = playlistIdSet();
     const seen = new Set(banned);
     const found = [];
-    const queries = shuffle(queryPool).slice(0, 6);
+    const queries = shuffle(queryPool).slice(0, Math.min(4, Math.max(2, state.languages.length * 2)));
 
     try {
       const batches = await Promise.allSettled(queries.map(searchLatestSongs));
@@ -2121,6 +2155,7 @@
   function renderRecommendations(){
     if (!els.recommendGrid) return;
     if (!cloud.user){
+      state.recommendRenderedKey = '';
       els.recommendGrid.replaceChildren();
       return;
     }
@@ -2130,7 +2165,7 @@
     }
     if (!state.languages.length){
       renderRecommendationMessage('Choose languages to get latest songs.');
-      window.setTimeout(() => openLanguageDialog(true), 50);
+      if (!languageDialogOpen()) window.setTimeout(() => openLanguageDialog(true), 50);
       return;
     }
     if (!state.recommendLoaded && !state.recommendLoading){
@@ -2143,6 +2178,9 @@
       return;
     }
 
+    const key = `grid:${state.loadedVideoId}:${items.map(item => item.id).join('|')}`;
+    if (state.recommendRenderedKey === key) return;
+    state.recommendRenderedKey = key;
     els.recommendGrid.replaceChildren();
     const fragment = document.createDocumentFragment();
     items.forEach(item => {
